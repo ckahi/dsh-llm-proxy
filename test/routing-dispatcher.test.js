@@ -115,6 +115,22 @@ test('missing proxy agent falls back to direct', () => {
   assert.equal(record[0].agent, 'direct')
 })
 
+test('proxyHost with an embedded http:// scheme is normalized', () => {
+  const record = []
+  const d = makeDispatcher(record, { proxyHost: 'http://192.168.1.10:10809', proxyHosts: ['api.b.ai'] })
+  assert.equal(d.proxy.uri, 'http://192.168.1.10:10809')
+  d.dispatch(req('https://api.b.ai/v1'), {})
+  assert.equal(record[0].agent, 'proxy:http://192.168.1.10:10809')
+})
+
+test('proxyHost with an https scheme is preserved and inline port wins', () => {
+  const record = []
+  const d = makeDispatcher(record, { proxyHost: 'https://proxy.example.com:8443', proxyPort: 7897, proxyHosts: ['api.b.ai'] })
+  assert.equal(d.proxy.uri, 'https://proxy.example.com:8443')
+  d.dispatch(req('https://api.b.ai/v1'), {})
+  assert.equal(record[0].agent, 'proxy:https://proxy.example.com:8443')
+})
+
 test('closed dispatcher rejects new requests', () => {
   const record = []
   const d = makeDispatcher(record)

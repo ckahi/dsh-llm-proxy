@@ -360,6 +360,52 @@ test('bridge routes enforce loopback + POST', async () => {
   assert.ok(modelEnvelope.value.models.some((m) => m.key === 'deepseek-v4-flash/deepseek-v4-flash'))
 })
 
+// --- bridge reverse-proxy trust (trustedOrigins whitelist) ------------------
+
+test('bridge guard: reverse-proxy Host stays 403 unless whitelisted', async () => {
+  const seam = makeFakeSeam().seam
+  function makeRes() {
+    return {
+      writeHead(status, headers) { this.status = status; this.headers = headers },
+      end(payload) { this.body = payload },
+    }
+  }
+  async function probe({ host, origin, trustedOrigins = [] }) {
+    const routes = makeBridgeRoutes(seam, { trustedOrigins })
+    const res = makeRes()
+    await routes[0].handler(
+      {
+        method: 'POST',
+        headers: { host, ...(origin === undefined ? {} : { origin }) },
+        socket: { remoteAddress: '127.0.0.1' },
+        [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }),
+      },
+      res,
+    )
+    return res.status
+  }
+
+  // 反代 + 白名单为空（默认）→ 403，保持现状。
+  assert.equal(await probe({ host: 'dsh.example.com', origin: 'https://dsh.example.com' }), 403)
+  // 反代 + 白名单命中 → 放行。
+  assert.equal(
+    await probe({ host: 'dsh.example.com', origin: 'https://dsh.example.com', trustedOrigins: ['https://dsh.example.com'] }),
+    200,
+  )
+  // 白名单命中但 Origin 是攻击者站点 → 仍 403（CSRF 同源防线保留）。
+  assert.equal(
+    await probe({ host: 'dsh.example.com', origin: 'https://evil.example.net', trustedOrigins: ['https://dsh.example.com'] }),
+    403,
+  )
+  // 白名单不匹配其它域名。
+  assert.equal(
+    await probe({ host: 'other.example.com', origin: 'https://other.example.com', trustedOrigins: ['https://dsh.example.com'] }),
+    403,
+  )
+  // 本机直连不依赖白名单，默认仍可用。
+  assert.equal(await probe({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }), 200)
+})
+
 // --- pi-ai catalog fallback (providers without explicit models) ------------
 
 /** A fake catalog matching the pi-ai built-in MiMo set (id/name/baseUrl). */

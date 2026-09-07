@@ -42,10 +42,14 @@ dsh plugin --profile web add C:/path/to/dsh-llm-proxy
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `proxyHost` / `proxyPort` | `127.0.0.1:7897` | 代理地址（Clash 等），可不在本机 |
+| `proxyHost` | `127.0.0.1` | 代理主机/IP（Clash 等），可不在本机。**只填主机，不要带 `http://`**（误填会自动归一化，内联端口也会生效） |
+| `proxyPort` | `7897` | 代理端口 |
 | `proxiedModels` | `[]` | 走代理的模型，`<providerId>/<modelId>`，其余直连 |
 | `multimodalModels` | `[]` | 多模态镜像：勾选**支持图像识别但官方声明/UI 没有图像输入入口**的模型（如 `deepseek-v4-flash-vision-exp`），插件在所属 provider 声明中标记支持图片输入（pi-ai 写 `input`、官方 DeepSeek 写 `inputModalities`），发图不再被 DSH 拒绝；纯文本模型（如 `deepseek-v4-flash`）勾选无意义；取消勾选自动还原 |
 | `retries` / `retryIntervalMs` | `3` / `1000` | 失败重试次数与间隔（ms） |
+| `trustedOrigins` | `[]` | **反代部署专用**（进阶项，走 settings.yaml 配置，不在设置卡显示）：设置页 bridge API 默认只允许回环主机访问，反代会把 `Host` 改写成公共域名导致 403；把公共访问源（完整 origin，如 `https://dsh.example.com`）加进此数组即可放行。默认空 = 仅本机。CSRF 同源校验始终生效——Host 命中白名单但 Origin 不一致仍会 403 |
+
+> 反代部署示例（settings.yaml 中该插件的配置段）：`trustedOrigins: ['https://dsh.example.com']`。多域名就多写几项。
 
 ## 验证
 

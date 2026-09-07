@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 (2026-09-08)
+
+- **反代部署兼容（issue #6）**：新增 `trustedOrigins` 设置项，把设置页 bridge API 的受信访问源从「仅回环主机」扩展到反代场景的公共域名。反代把 `Host`/`Origin` 改写为公共域名时，将公共 origin（如 `https://dsh.example.com`）加入白名单即可放行，不再误报 403。默认空，行为与之前完全一致；CSRF 同源校验始终生效（Host 命中白名单但 Origin 不一致仍 403）。进阶项走 settings.yaml 配置。
+- **`proxyHost` 容错（issue #3）**：`proxyHost` 误填 `http://` 前缀或内联端口时自动归一化（支持 http/https 协议），不再拼出 `http://http://…` 导致代理路由静默失效；README 配置表拆分为 `proxyHost` / `proxyPort` 两行并明确「不要带 http://」。
+- 新增测试：bridge 反代白名单（命中放行 / 白名单外 403 / 攻击者 Origin 403 / 本机直连不受影响）+ proxyHost 归一化（http 前缀、https 内联端口）。全套 61 个用例通过。
+
 ## v1.2.0 (2026-09-07)
 
 - **DSH ≥ 0.1.2 兼容（重要）**：client bundle 的快照 store 外部引用从 rc.7 时代的 `@deepseek-ai/dsh-client-runtime/client` 改为新 DSH 的平台 seed `@deepseek-ai/dsh-client-store`（`createSnapshotStore` API 完全一致）。修复新版本 DSH Desktop 上「Failed to load plugins … client-modules: require("@deepseek-ai/dsh-client-runtime/client") missed the module table」导致插件无法加载。
