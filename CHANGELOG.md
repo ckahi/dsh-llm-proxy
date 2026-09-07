@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.0 (2026-09-07)
+
+- **DSH ≥ 0.1.2 兼容（重要）**：client bundle 的快照 store 外部引用从 rc.7 时代的 `@deepseek-ai/dsh-client-runtime/client` 改为新 DSH 的平台 seed `@deepseek-ai/dsh-client-store`（`createSnapshotStore` API 完全一致）。修复新版本 DSH Desktop 上「Failed to load plugins … client-modules: require("@deepseek-ai/dsh-client-runtime/client") missed the module table」导致插件无法加载。
+  - **注意：v1.2.0 的 client bundle 面向 DSH ≥ 0.1.2**（模块表含 `dsh-client-store`），不再兼容 rc.7/rc.8 运行时；旧 DSH 用户请停留在 v1.1.x。
+- 宿主侧去掉 rc.8-only 的 `settingsNamespace()` 品牌校验调用（`LLM_PROXY_NAMESPACE` 改为字面量 `'llm-proxy'`），`@deepseek-ai/dsh-settings` 的依赖收敛为两版都导出的 `SettingsConflictError`，降低对 profile 内 rc.8 副本的隐性依赖。
+- 附带收录此前未发布的重试改进（`lib/index.js` + `test/retry-mirror.test.js`）：
+  - 固定间隔重试：镜像回退 `maxDelayMs == initialDelayMs`、`jitterRatio 0`，传输层忽略 `Retry-After`（undici 默认会遵循该头导致间隔漂移），卡片设置的间隔在每个重试尝试上都精确生效，不再呈 1s→2s→4s→8s 指数堆积。
+  - 传输层重试状态码纳入 `400` 与 `402`；retryPolicy 镜像的 `retryableCodes` 补 `QUOTA` / `INVALID_REQUEST`（B.AI 等「余额不足 / invalid_request」自动按固定节奏续跑，而不是直接失败）。
+
 ## v1.1.0 (2026-08-24)
 
 - **测试连接**：走代理的模型列表每行新增「测试连接」按钮。宿主侧新增 loopback 桥接端点 `POST /api/dsh-llm-proxy/settings/test`，对被勾选模型发一个最小 `chat/completions` 探测请求（走插件自己的全局 dispatcher，即真实代理路径），返回 HTTP 状态 / 耗时 / 是否经代理 / 多模态是否开启；网络超时、认证失败、限流、服务端错误都有明确提示（`lib/connection-test.js`）。

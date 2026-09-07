@@ -11,7 +11,7 @@
  */
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 /** Settings namespace owned by the plugin (mirrors lib/settings.js). */
 export const LLM_PROXY_NAMESPACE = 'llm-proxy'

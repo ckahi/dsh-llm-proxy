@@ -132,6 +132,9 @@ test('mirror writes retryPolicy for selected models only', async () => {
   const selected = pi.providers['deepseek-v4-flash'].retryPolicy
   assert.equal(selected.maxRetries, 5, 'selected model mirrors card retries')
   assert.equal(selected.backoff.initialDelayMs, 1000, 'selected model mirrors card interval')
+  assert.equal(selected.backoff.maxDelayMs, 1000, 'fixed-interval: maxDelayMs == initialDelayMs')
+  assert.equal(selected.backoff.jitterRatio, 0, 'fixed-interval: jitter disabled')
+  assert.deepEqual(selected.retryableCodes, ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'QUOTA', 'INVALID_REQUEST'], 'mirrored retryableCodes cover QUOTA + INVALID_REQUEST')
   assert.equal(selected.mode, 'normal')
   assert.equal(pi.providers.xiaomi.retryPolicy, undefined, 'unselected provider untouched')
 })
@@ -272,6 +275,8 @@ test('mirror matches catalog-backed providers (no explicit models)', async () =>
     const mirrored = pi.providers.xiaomi.retryPolicy
     assert.equal(mirrored.maxRetries, 7, 'catalog-backed model mirrors card retries')
     assert.equal(mirrored.backoff.initialDelayMs, 2000, 'catalog-backed model mirrors card interval')
+    assert.equal(mirrored.backoff.maxDelayMs, 2000, 'catalog-backed fixed-interval: maxDelayMs == initialDelayMs')
+    assert.equal(mirrored.backoff.jitterRatio, 0, 'catalog-backed fixed-interval: jitter disabled')
     assert.equal(pi.providers['deepseek-v4-flash'].retryPolicy, undefined, 'unselected provider untouched')
   } finally {
     __resetCatalogForTest()
