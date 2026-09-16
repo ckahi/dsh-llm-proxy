@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.4.0 (2026-09-10)
+
+- **官方优先：复用官方出站代理层（重要）**。检测到官方 `@deepseek-ai/dsh-http-proxy`（随 dsh ≥ 0.1.3 安装，是库不是插件）时，插件不再自建全局 dispatcher，而是通过官方公开接缝 `installProxyFromEnvironment(envLookup, report)` 喂一份算好的策略：`https_proxy` / `http_proxy` 取自设置卡的代理地址，`no_proxy` = 除勾选模型之外的所有已配置 provider 主机。官方自己的匹配器、子进程环境发布、web-fetch 例外语义全部保留，插件只负责官方不提供的那一个决定——「哪个模型走代理」。卸载时把 launcher 原本的策略原样还回去。
+- **旧 harness 自动回退**。加载不到该包时（dsh ≤ 0.1.2，含内置桌面壳 0.1.2-rc.1）继续使用自带 `RoutingDispatcher`，行为与 v1.3.0 一致。日志首行打印实际引擎：`engine=official …` 或 `engine=bundled …`。
+- **删除传输层重试（RetryAgent）**。此前 `RetryAgent(RoutingDispatcher)` 与官方 `dsh-llm-retry` 会同时重试同一次请求（最坏情况重试次数²），且刻意忽略 `Retry-After`、把 400/402 当作可重试，与官方语义冲突。现在重试**只**由官方 `dsh-llm-retry` 按每个 provider 的 `retryPolicy` 执行；卡片的 `retries` / `retryIntervalMs` 仍照旧镜像进该配置（v1.0.3 起的行为，只作用于被勾选的 provider），设置页体验不变。
+- **「测试连接」报告真实路由**。探测结果里的 经代理／直连 来自当前引擎（官方 `proxyRouteFor` 或自带 `planFor()`），不再是配置意图；引擎答不出来时回退到配置值。
+- **官方引擎的直连语义变化（需知）**：官方策略默认「代理一切、按 `no_proxy` 绕过」，所以非 provider 主机（web fetch、HTTP MCP、curl）在官方引擎下会走代理；自带引擎仍是「只代理勾选的模型主机」。插件会读取并沿用你已有的 `no_proxy` 环境变量（与自动算出绕过列表合并，不覆盖）。
+- **socks5 / PAC 等 scheme 保护**：官方解析器不接受这类代理 URL 并会回退成 DIRECT（等于抹掉 launcher 已配好的代理），因此插件在这类配置下拒绝安装、保留官方策略并打印原因。
+- 新增 `lib/official-proxy.js`（引擎探测 + 策略构造：`loadOfficialProxy` / `policyEnvLookup` / `splitProxyList`）与 `test/official-proxy.test.js`（14 个用例：注入检测与无效包拒绝、策略映射与大小写、空勾选不安装、非 http scheme 拒绝、重入时释放旧 overlay、卸载还原、真实路由回报与回退）。
+- `test/routing-dispatcher.test.js` 的 RetryAgent 段替换为 `planFor()`（真实路由判定、不产生请求、非法输入不抛错）用例；`test/smoke-test.mjs` 同步去除重试场景、加入 `planFor()` 校验。
+- **测试与机器环境解耦**：`lib/official-proxy.js` 的测试钩子新增「强制视为未安装」（`__setOfficialProxyForTest(null)`）语义，`test/settings.test.js` 用它固定验证自带引擎分支——否则一台在上级目录装有官方包的机器会把 `resolveProxyHosts`/dispatcher 断言翻成官方分支（这正是本次开发中真实出现过的失败）。全套 **76** 个用例通过。
+- **真机验证（不涉及本机桌面壳）**：① 在装有真实 `@deepseek-ai/dsh-http-proxy@0.1.5-rc.1` 的目录树中运行插件，确认 `engine=official`、策略注入、选中主机经代理、其余 provider 主机走 `no_proxy`、卸载后策略还原；② 在隔离 `DSH_HOME` 下用 npm 版 `@deepseek-ai/dsh@0.1.5-rc.1` 启动真实 web 服务并安装本插件，通过 bridge `/settings/test` 实测：选中模型 `viaProxy: true` 且本地假代理收到该请求，未选中模型 `viaProxy: false` 直连成功，`retryPolicy` 正确镜像；同时用一个探针插件确认进程全局 dispatcher 不是 `RoutingDispatcher`（即插件未自建 dispatcher）。
+
 ## v1.3.0 (2026-09-08)
 
 - **反代部署兼容（issue #6）**：新增 `trustedOrigins` 设置项，把设置页 bridge API 的受信访问源从「仅回环主机」扩展到反代场景的公共域名。反代把 `Host`/`Origin` 改写为公共域名时，将公共 origin（如 `https://dsh.example.com`）加入白名单即可放行，不再误报 403。默认空，行为与之前完全一致；CSRF 同源校验始终生效（Host 命中白名单但 Origin 不一致仍 403）。进阶项走 settings.yaml 配置。

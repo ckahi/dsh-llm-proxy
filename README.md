@@ -2,28 +2,41 @@
 
 [![npm](https://img.shields.io/npm/v/@superfish058/dsh-llm-proxy)](https://www.npmjs.com/package/@superfish058/dsh-llm-proxy)
 
-DSH 模型代理插件：给 LLM 请求按「目标域名」分流——选中的模型走代理，其余直连，失败自动重试。
+DSH 模型代理插件：给 LLM 请求按「目标域名」分流——选中的模型走代理，其余直连。官方出站代理包（dsh ≥ 0.1.3）在时装官方引擎复用其传输层，旧 harness 用自带 dispatcher；重试统一交给官方 `dsh-llm-retry`。
 
 ## 它是干嘛的
 
 - **按模型走代理**：在 DSH 设置页（插件 → 可配置插件 → 模型代理）勾选需要走代理的模型（如 `deepseek-v4-flash`），该模型的请求自动经 `proxyHost:proxyPort`（默认 `127.0.0.1:7897`，即 Clash）转发；未勾选的模型（DeepSeek、小米、通义等国内 API）保持直连。路由按模型的 **API 地址（baseURL host）** 生效：选中一个模型后，同一地址下的所有模型都会走代理（例如 B.AI 的 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 共享 `api.b.ai`）。
-- **失败自动重试**：对断连（ECONNRESET 等）、HTTP 429 限流、5xx 错误自动重试（默认 3 次、间隔 1s），减少免费额度被瞬时错误打断。
+- **失败自动重试（官方引擎）**：重试由官方 `dsh-llm-retry` 执行——对断连（ECONNRESET 等）、429 限流、5xx 按 provider 自己的 `retryPolicy` 重放请求（默认 5 次、500ms→10s 指数退避 + 抖动，并遵循 `Retry-After`）。卡片上的 `retries`/`retryIntervalMs`（默认 3 次 / 1s 固定间隔）镜像进**被勾选** provider 的该策略，取消勾选还原官方默认；插件自身不再在传输层重试（v1.4.0 起）。
 - **模型列表与官方一致**：只配了 `apiKeyEnv`、没写 `models` 的 provider（如 `xiaomi`），其模型从 pi-ai 内置目录（`@earendil-works/pi-ai`）回退补齐；`llm-deepseek` 命名空间即使保持默认空文档（`llm-deepseek: {}`）也回退官方内置目录（`https://api.deepseek.com` + `DEEPSEEK_API_KEY`），`deepseek-official/*` 模型开箱可用。勾选列表与 DSH 官方模型选择器完全同步。
-- **retryPolicy 镜像**：卡片上的 `retries`/`retryIntervalMs` 会镜像进被勾选 provider 的官方 `retryPolicy`（驱动设置页可见的 `(retry/maximum)` 提示），取消勾选自动还原官方默认值——一套配置同时驱动传输层重试与官方重试 UI。
+- **retryPolicy 镜像**：卡片上的 `retries`/`retryIntervalMs` 会镜像进被勾选 provider 的官方 `retryPolicy`（既是设置页 `(retry/maximum)` 提示的来源，也是真正的重试参数），取消勾选自动还原官方默认值——一套配置驱动官方重试。
 - **多模态模型镜像**：DSH 官方模型声明里，部分**支持图像识别**的模型（如 `deepseek-v4-flash-vision-exp`）没有可供用户勾选「图像输入」的配置入口，选中后发图会被 DSH 以 `UNSUPPORTED_CONTENT` 拒绝。在设置卡「多模态模型」区勾选这些模型后，插件把 `image` 写进所属 provider 的模型声明（pi-ai 的 `models[].input` / 目录型 `modelOverrides[].input`，官方 DeepSeek 的 `models[].inputModalities`），使 DSH 允许对该模型发图；取消勾选自动还原官方默认。注意：该功能只对真正支持图像输入的模型（如 vision 模型）有意义，纯文本模型（如 `deepseek-v4-flash`）勾选后 DSH 虽放行，实际请求仍会因模型不支持图像而报错。
-- **测试连接**：走代理的模型列表每行新增「测试连接」按钮，探测请求走插件自己的全局 dispatcher（即真实代理路径：勾选模型经代理、其余直连），返回 HTTP 状态 / 耗时 / 经代理或直连 / 多模态开启状态；失败时直接显示提供方返回的错误 body（脱敏、截断），如 B.AI 的 `max_tokens` 限制一眼可见。注意：测试走**已保存**的配置——改了勾选后请先点「保存」再测试。
+- **测试连接**：走代理的模型列表每行新增「测试连接」按钮，探测请求走当前生效的全局 dispatcher（即真实 LLM 请求的路径），返回 HTTP 状态 / 耗时 / **引擎给出的真实路由**（经代理或直连）/ 多模态开启状态；失败时直接显示提供方返回的错误 body（脱敏、截断），如 B.AI 的 `max_tokens` 限制一眼可见。注意：测试走**已保存**的配置——改了勾选后请先点「保存」再测试。
 - **保存即生效，无需重启**：设置写入 `llm-proxy` 命名空间后运行时整体替换 dispatcher，不碰 `settings.yaml` 里的供应商配置。冷启动时若 provider 命名空间（`llm-pi-ai`/`llm-deepseek`）尚未注册，插件会带退避重试直到可解析代理域名，不再需要手动"恢复默认再保存"。
 
 ## 用什么技术
 
-- **undici 全局 Dispatcher 注入**：`RoutingDispatcher`（按 hostname 路由）+ 官方 `RetryAgent`（重试）包一层自定义 dispatcher 挂到 Node 全局。LLM 请求（OpenAI SDK → undici fetch）自动经过它，位于 LLM 适配器之下、供应商之上。
+- **两种引擎**：优先复用官方 `@deepseek-ai/dsh-http-proxy`（用它的公开接缝安装一份按模型算出来的进程策略，不自建 dispatcher）；没有该包时退化为自带的 `RoutingDispatcher`（按 hostname 路由）挂到 Node 全局 undici dispatcher。LLM 请求（OpenAI SDK → undici fetch）自动经过它，位于 LLM 适配器之下、供应商之上。
 - **Cordis 插件**：宿主侧注册 `llm-proxy` 设置命名空间（`lib/settings.js`）；浏览器侧设置卡片（`src/client/`，挂 `settings.plugin.item` slot，走官方 transport、bridge 兜底）。
 - **客户端构建**：tsdown（Rolldown）打包 `lib/client.js`，经 `window.__ModuleLoader__` 注入前端。
+
+## 与官方 `@deepseek-ai/dsh-http-proxy` 的关系
+
+DSH 官方从 0.1.3 起自带出站代理包（`@deepseek-ai/dsh-http-proxy`，npm 上是**库**不是插件）：它实现**进程级**代理策略（`HTTP(S)_PROXY` / `NO_PROXY`、子进程环境发布、web-fetch 例外），但**没有**「按模型 / 按 provider 分流」的概念——策略只有一份。粒度这件事只有插件能做，所以本插件按环境选引擎：
+
+| 引擎 | 触发条件 | 谁拥有传输层 | 直连语义 |
+|---|---|---|---|
+| `official` | 能加载到官方 `@deepseek-ai/dsh-http-proxy`（dsh ≥ 0.1.3） | 官方。插件只调用其公开接缝 `installProxyFromEnvironment(envLookup, report)` 喂一份算好的策略，卸载时把 launcher 原本的策略原样还回去 | 官方默认「代理一切、按 `no_proxy` 绕过」：勾选的模型主机走代理，其余**已配置 provider** 主机写进 `no_proxy` 保持直连；非 provider 主机（web fetch / HTTP MCP）跟随代理 |
+| `bundled` | 加载不到（dsh ≤ 0.1.2，含内置桌面壳 0.1.2-rc.1） | 插件自己：`RoutingDispatcher` 挂到 undici 全局 dispatcher | 只代理勾选的模型主机，其余一切直连（含 web fetch / MCP） |
+
+日志首行会打印实际引擎（`engine=official …` / `engine=bundled …`）。官方引擎下你原有的 `no_proxy` 环境变量会被读取并与插件算出的绕过列表合并，不会被覆盖；代理地址是 socks5 / PAC 等官方不路由的 scheme 时，插件拒绝安装并保留 launcher 策略（官方解析器此时会回退成 DIRECT，等于抹掉你已配好的代理）。
+
+**重试**不在这条分流的讨论范围内：插件的传输层 `RetryAgent` 已在 v1.4.0 移除（它和官方 `dsh-llm-retry` 会同时重试同一次请求），重试统一由官方按每个 provider 的 `retryPolicy` 执行。
 
 ## 适合什么场景
 
 - 国内网络访问**境外模型 API**（如 `api.b.ai`）超时/不可达——代理已就绪，只想让特定模型走。
-- **免费额度**被 429/5xx 打断，需要自动重试扛过限流窗口。
+- **免费额度**被 429/5xx 打断，需要按 provider 自动重试扛过限流窗口（走官方 `retryPolicy`，勾选即生效）。
 - 想**按模型粒度**控制代理，而不是全局开代理连累国内直连 API。
 
 ## 安装
@@ -46,7 +59,7 @@ dsh plugin --profile web add C:/path/to/dsh-llm-proxy
 | `proxyPort` | `7897` | 代理端口 |
 | `proxiedModels` | `[]` | 走代理的模型，`<providerId>/<modelId>`，其余直连 |
 | `multimodalModels` | `[]` | 多模态镜像：勾选**支持图像识别但官方声明/UI 没有图像输入入口**的模型（如 `deepseek-v4-flash-vision-exp`），插件在所属 provider 声明中标记支持图片输入（pi-ai 写 `input`、官方 DeepSeek 写 `inputModalities`），发图不再被 DSH 拒绝；纯文本模型（如 `deepseek-v4-flash`）勾选无意义；取消勾选自动还原 |
-| `retries` / `retryIntervalMs` | `3` / `1000` | 失败重试次数与间隔（ms） |
+| `retries` / `retryIntervalMs` | `3` / `1000` | 重试次数与固定间隔（ms）。只镜像进**被勾选** provider 的官方 `retryPolicy`（重试由 `dsh-llm-retry` 执行）；插件自身不在传输层重试 |
 | `trustedOrigins` | `[]` | **反代部署专用**（进阶项，走 settings.yaml 配置，不在设置卡显示）：设置页 bridge API 默认只允许回环主机访问，反代会把 `Host` 改写成公共域名导致 403；把公共访问源（完整 origin，如 `https://dsh.example.com`）加进此数组即可放行。默认空 = 仅本机。CSRF 同源校验始终生效——Host 命中白名单但 Origin 不一致仍会 403 |
 
 > 反代部署示例（settings.yaml 中该插件的配置段）：`trustedOrigins: ['https://dsh.example.com']`。多域名就多写几项。
@@ -63,10 +76,16 @@ dsh plugin --profile web add C:/path/to/dsh-llm-proxy
 **日志方式**：重启后日志出现：
 
 ```
-dsh-llm-proxy: global dispatcher → RetryAgent(RoutingDispatcher) (proxy=127.0.0.1:7897, ...)
+# dsh ≥ 0.1.3：官方出站代理包在 → 官方引擎
+dsh-llm-proxy: engine=official — official outbound-proxy package detected (...); the transport layer stays official, this plugin only computes the per-model policy
+dsh-llm-proxy: official policy installed (engine=official, proxy=127.0.0.1:7897, proxiedHosts=[api.b.ai], directHosts=[api.deepseek.com])
+
+# dsh ≤ 0.1.2：没有官方包 → 自带 dispatcher
+dsh-llm-proxy: engine=bundled — official outbound-proxy package not found, using the built-in dispatcher
+dsh-llm-proxy: global dispatcher → RoutingDispatcher (engine=bundled, proxy=127.0.0.1:7897, proxiedHosts=[api.b.ai])
 ```
 
-模型选择器里选中代理模型，流式响应正常、仅该模型域名走代理即成功。
+模型选择器里选中代理模型，流式响应正常、该模型域名出现在 `proxiedHosts` 里即成功。（官方引擎遵循官方「默认代理、按 `no_proxy` 绕过」语义，因此非 provider 主机也会走代理；自带引擎则只代理勾选的模型主机。）
 
 ## 遇到问题？让大模型帮你排查
 

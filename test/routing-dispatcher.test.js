@@ -1,12 +1,14 @@
 /**
- * dsh-llm-proxy v4 鈥?unit tests for RoutingDispatcher (pure router) and the
- * undici RetryAgent wrapper that provides retry.
+ * dsh-llm-proxy — unit tests for RoutingDispatcher, the bundled engine's pure
+ * router (used on harnesses without the official outbound-proxy package).
  *
  * Routing semantics: loopback hosts always go DIRECT; hosts in the proxied
  * host set go through the single ProxyAgent; everything else stays DIRECT.
+ * `planFor()` answers the same question without dispatching, which is what the
+ * settings card's 测试连接 reports.
  *
- * Retry semantics (undici official RetryAgent): transport errors, HTTP 429
- * and 5xx replay the request up to `maxRetries` times with a fixed interval.
+ * Retry is NOT part of this layer since v1.4.0 — the official dsh-llm-retry
+ * plugin replays failures from each provider's own retryPolicy.
  *
  * Uses a fake undici shim (Agent/ProxyAgent recording dispatch targets) so no
  * real network or proxy is touched. Run: node --test test/*.test.js
@@ -14,7 +16,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { RoutingDispatcher } from '../lib/routing-dispatcher.js'
-import { RetryAgent } from 'undici'
 
 // --- Fake undici -------------------------------------------------------------
 function makeUndici(record) {
@@ -140,192 +141,50 @@ test('closed dispatcher rejects new requests', () => {
   assert.ok(failed instanceof Error)
 })
 
-// --- RetryAgent wrapper (undici official) -------------------------------------
-function makeFailingUndici(record, { failTimes = 1, failStatus } = {}) {
-  class FakeAgent {
-    constructor() {
-      this.name = 'direct'
-    }
-    dispatch(opts, handler) {
-      record.push({ agent: 'direct', origin: opts.origin, host: opts.host })
-      const attempt = record.filter((r) => r.origin === opts.origin).length
-      if (attempt <= failTimes && failStatus !== undefined) {
-        // Retryable response: hand out a pausable controller. The body
-        // completes only once `resume()` is called (RetryHandler pauses it
-        // while deciding, resumes on the next attempt).
-        const controller = makeController(() => handler?.onResponseEnd?.(null, {}))
-        handler?.onRequestStart?.(controller)
-        handler?.onResponseStart?.(controller, failStatus, {}, 'FAIL')
-        return true
-      }
-      if (attempt <= failTimes) {
-        handler?.onResponseError?.(null, new Error('ECONNRESET'))
-        return true
-      }
-      // Success: undici pushes the response immediately.
-      const controller = makeController(null)
-      handler?.onRequestStart?.(controller)
-      handler?.onResponseStart?.(controller, 200, {}, 'OK')
-      handler?.onResponseEnd?.(null, {})
-      return true
-    }
-    close() {
-      return Promise.resolve()
-    }
-    destroy() {
-      return Promise.resolve()
-    }
-  }
-  return { Agent: FakeAgent, ProxyAgent: FakeAgent }
-}
+// --- planFor: the route verdict without dispatching ---------------------------
+// v1.4.0: the card's 测试连接 asks the engine where a URL would go, so the answer
+// comes from the same matcher that routes real traffic instead of from the
+// configured selection. Retry left this layer entirely — the official
+// dsh-llm-retry plugin replays failures from each provider's retryPolicy, which
+// test/retry-mirror.test.js covers.
 
-/**
- * A minimal controller shim satisfying RetryHandler's pause/resume/abort:
- * the body/end callbacks fire only after `resume()` (matching undici's
- * paused-connection behaviour), so retry can pause an attempt and resume the
- * next one without the failed response racing ahead.
- */
-function makeController(onResumed) {
-  let resumed = false
-  return {
-    paused: true,
-    aborted: false,
-    reason: null,
-    rawHeaders: null,
-    rawTrailers: null,
-    pause() { this.paused = true },
-    resume() {
-      this.paused = false
-      if (!resumed) {
-        resumed = true
-        onResumed?.()
-      }
-    },
-    abort(reason) { this.aborted = true; this.reason = reason },
-  }
-}
-
-function settle() {
-  const handler = {}
-  const promise = new Promise((resolve) => {
-    let status = null
-    let error = null
-    // undici signature: onResponseStart(controller, status, headers, statusText)
-    handler.onResponseStart = (controller, code) => { status = code }
-    handler.onResponseEnd = () => resolve({ status, error })
-    handler.onResponseError = (_, err) => { error = err; resolve({ status, error }) }
-  })
-  return { handler, promise }
-}
-
-test('RetryAgent: transport error retries and then succeeds', async () => {
+test('planFor: a selected host reports proxied and issues no request', () => {
   const record = []
-  const router = new RoutingDispatcher({
-    undici: makeFailingUndici(record, { failTimes: 1 }),
-    proxyHost: '127.0.0.1',
-    proxyPort: 7897,
-  })
-  const retry = new RetryAgent(router, {
-    throwOnError: false,
-    maxRetries: 2,
-    minTimeout: 1,
-    timeoutFactor: 1,
-    maxTimeout: 5,
-    methods: ['POST'],
-    statusCodes: [429, 500, 502, 503, 504],
-  })
-  const { handler, promise } = settle()
-  retry.dispatch(req('https://api.deepseek.com/v1'), handler)
-  const out = await promise
-  assert.equal(out.status, 200)
-  assert.equal(record.length, 2, 'one failure + one retry')
+  const d = makeDispatcher(record, { proxyHosts: ['api.b.ai'] })
+  const plan = d.planFor('https://api.b.ai/v1/chat/completions')
+  assert.deepEqual(plan, { proxied: true, host: 'api.b.ai' })
+  assert.deepEqual(record, [], 'planning must not touch the network')
 })
 
-test('RetryAgent: HTTP 429 retries and then succeeds', async () => {
+test('planFor: unselected and loopback hosts report direct', () => {
   const record = []
-  const router = new RoutingDispatcher({
-    undici: makeFailingUndici(record, { failTimes: 1, failStatus: 429 }),
-    proxyHost: '127.0.0.1',
-    proxyPort: 7897,
-  })
-  const retry = new RetryAgent(router, {
-    throwOnError: false,
-    maxRetries: 2,
-    minTimeout: 1,
-    timeoutFactor: 1,
-    maxTimeout: 5,
-    methods: ['POST'],
-    statusCodes: [429, 500, 502, 503, 504],
-  })
-  const { handler, promise } = settle()
-  retry.dispatch(req('https://api.deepseek.com/v1'), handler)
-  const out = await promise
-  assert.equal(out.status, 200)
-  assert.equal(record.length, 2)
+  const d = makeDispatcher(record, { proxyHosts: ['api.b.ai'] })
+  assert.equal(d.planFor('https://api.deepseek.com/v1').proxied, false)
+  assert.equal(d.planFor('http://127.0.0.1:50840/api/dsh').proxied, false)
+  assert.equal(d.planFor('https://localhost:3080/').proxied, false)
+  assert.deepEqual(record, [])
 })
 
-test('RetryAgent: HTTP 503 retries and then succeeds', async () => {
+test('planFor: a subdomain of a selected host reports proxied', () => {
   const record = []
-  const router = new RoutingDispatcher({
-    undici: makeFailingUndici(record, { failTimes: 2, failStatus: 503 }),
-    proxyHost: '127.0.0.1',
-    proxyPort: 7897,
-  })
-  const retry = new RetryAgent(router, {
-    throwOnError: false,
-    maxRetries: 3,
-    minTimeout: 1,
-    timeoutFactor: 1,
-    maxTimeout: 5,
-    methods: ['POST'],
-    statusCodes: [429, 500, 502, 503, 504],
-  })
-  const { handler, promise } = settle()
-  retry.dispatch(req('https://api.deepseek.com/v1'), handler)
-  const out = await promise
-  assert.equal(out.status, 200)
-  assert.equal(record.length, 3, 'two failures + one retry')
+  const d = makeDispatcher(record, { proxyHosts: ['b.ai'] })
+  assert.equal(d.planFor('https://api.b.ai/v1').proxied, true)
 })
 
-test('RetryAgent: exhausted retries surface the final error', async () => {
+test('planFor: a rejected proxy endpoint keeps every host direct', () => {
   const record = []
-  const router = new RoutingDispatcher({
-    undici: makeFailingUndici(record, { failTimes: 99 }),
-    proxyHost: '127.0.0.1',
-    proxyPort: 7897,
+  const d = new RoutingDispatcher({
+    undici: makeUndici(record),
+    proxyHost: 'not a url',
+    proxyPort: 99999,
+    proxyHosts: ['api.b.ai'],
   })
-  const retry = new RetryAgent(router, {
-    throwOnError: false,
-    maxRetries: 2,
-    minTimeout: 1,
-    timeoutFactor: 1,
-    maxTimeout: 5,
-    methods: ['POST'],
-    statusCodes: [429, 500, 502, 503, 504],
-  })
-  const { handler, promise } = settle()
-  retry.dispatch(req('https://api.deepseek.com/v1'), handler)
-  const out = await promise
-  assert.ok(out.error instanceof Error)
-  assert.equal(record.length, 3, 'initial attempt + 2 retries')
+  assert.equal(d.planFor('https://api.b.ai/v1').proxied, false)
 })
 
-test('RetryAgent: retries disabled (0) forwards the failure immediately', async () => {
+test('planFor: unparseable input answers direct instead of throwing', () => {
   const record = []
-  const router = new RoutingDispatcher({
-    undici: makeFailingUndici(record, { failTimes: 99 }),
-    proxyHost: '127.0.0.1',
-    proxyPort: 7897,
-  })
-  const retry = new RetryAgent(router, {
-    throwOnError: false,
-    maxRetries: 0,
-    methods: ['POST'],
-    statusCodes: [429, 500, 502, 503, 504],
-  })
-  const { handler, promise } = settle()
-  retry.dispatch(req('https://api.deepseek.com/v1'), handler)
-  const out = await promise
-  assert.ok(out.error instanceof Error)
-  assert.equal(record.length, 1)
+  const d = makeDispatcher(record, { proxyHosts: ['api.b.ai'] })
+  assert.deepEqual(d.planFor('not a url'), { proxied: false, host: 'not a url' })
+  assert.deepEqual(d.planFor(undefined), { proxied: false, host: '' })
 })

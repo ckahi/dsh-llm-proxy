@@ -1,7 +1,7 @@
 {
   "name": "@superfish058/dsh-llm-proxy",
-  "version": "1.3.0",
-  "description": "DSH 模型代理插件：按模型走代理（Clash 等）+ 失败自动重试，设置页实时生效。",
+  "version": "1.4.0",
+  "description": "DSH 模型代理插件：按模型走代理（Clash 等），有官方出站代理包时复用其传输层，设置页实时生效。",
   "author": "superfish058",
   "repository": {
     "type": "git",
@@ -31,7 +31,7 @@
     "prepare": "tsdown",
     "build:watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/routing-dispatcher.test.js test/settings.test.js test/retry-mirror.test.js test/multimodal-mirror.test.js test/connection-test.test.js",
+    "test": "node --test test/routing-dispatcher.test.js test/settings.test.js test/retry-mirror.test.js test/multimodal-mirror.test.js test/connection-test.test.js test/official-proxy.test.js",
     "test:client": "node test/client-build.test.js",
     "test:smoke": "node test/smoke-test.mjs",
     "test:load": "node test/load-test.mjs",

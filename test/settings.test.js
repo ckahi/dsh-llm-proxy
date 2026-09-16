@@ -19,6 +19,12 @@ import {
   makeBridgeRoutes,
 } from '../lib/settings.js'
 import { __resetCatalogForTest, __setCatalogForTest } from '../lib/catalog.js'
+import { __setOfficialProxyForTest } from '../lib/official-proxy.js'
+
+// This file covers the BUNDLED engine (dsh <= 0.1.2). Force "the official
+// package is not installed" so the assertions hold on any machine — including
+// one that happens to have @deepseek-ai/dsh-http-proxy on the module path.
+__setOfficialProxyForTest(null)
 
 /** Deep-merge helper for the fake seam's composition resolution. */
 function merge(base, user) {
