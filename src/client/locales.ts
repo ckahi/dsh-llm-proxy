@@ -1,5 +1,5 @@
 /**
- * The `settings.llm-proxy` locale dictionaries for the 模型代理 section.
+ * The `settings.llm-proxy` locale dictionaries for the 模型代理 page.
  * Keys track exactly the UI-surfaced fields (proxyHost/proxyPort,
  * proxiedModels, retries/retryIntervalMs).
  */
@@ -32,16 +32,12 @@ export const zh = {
   invalidEmpty: '代理地址不能为空。',
   expand: '展开',
   collapse: '收起',
-  fieldMultimodalModels: '多模态模型（multimodalModels）',
-  fieldMultimodalModelsHint: '勾选后模型声明支持图片输入，DSH 不再拒绝发图；取消勾选自动还原。',
-  multimodalBadge: '🖼 多模态',
   test: '测试连接',
   testing: '测试中…',
   testOk: '连接成功',
   testFail: '连接失败',
   testViaProxy: '经代理',
   testDirect: '直连',
-  testMultimodalOn: '多模态已开启',
   testBarHint: '「测试连接」走已保存的配置，改代理勾选后请先保存再测试。',
 }
 
@@ -73,16 +69,12 @@ export const en: Record<keyof typeof zh, string> = {
   invalidEmpty: 'Proxy host must not be empty.',
   expand: 'Expand',
   collapse: 'Collapse',
-  fieldMultimodalModels: 'Multimodal models (multimodalModels)',
-  fieldMultimodalModelsHint: 'Checked models are advertised as accepting image input; unchecking restores the official defaults.',
-  multimodalBadge: '🖼 Multimodal',
   test: 'Test',
   testing: 'Testing…',
   testOk: 'Connected',
   testFail: 'Failed',
   testViaProxy: 'via proxy',
   testDirect: 'direct',
-  testMultimodalOn: 'multimodal on',
   testBarHint: 'Test uses the saved routing; save before testing a newly proxied model.',
 }
 

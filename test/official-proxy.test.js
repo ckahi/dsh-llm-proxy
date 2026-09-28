@@ -53,47 +53,41 @@ function makeOfficialStub({ proxied = true } = {}) {
 /** Fake settings seam: one llm-proxy document plus the provider namespaces. */
 function makeSeam(base) {
   let user = {}
-  const watchers = new Set()
   const resolved = () => ({ ...base, ...user })
   return {
     seam: {
       writable: true,
       documentPath: 'fake-settings.yaml',
-      register() {
-        return {
-          get: () => resolved(),
-          watch(callback) {
-            watchers.add(callback)
-            return () => watchers.delete(callback)
-          },
-          update() {},
-          replace() {},
-        }
-      },
       describe({ redactSecrets } = {}) {
         assert.ok(redactSecrets === true || redactSecrets === undefined)
         return [{ ns: 'llm-proxy', value: resolved(), base, user: { ...user }, revision: 0 }, PI_AI]
       },
       async mutate() {},
     },
-    /** Commit a change and fire the live-apply watcher. */
+    /** Commit a change to the composition (used by the bridge's own tests). */
     commit(next) {
       user = { ...user, ...next }
-      for (const callback of watchers) void callback(resolved())
+      return resolved()
     },
-    watcherCount: () => watchers.size,
   }
 }
 
-/** Fake cordis ctx: synchronous inject, captured logs, dispose hooks. */
+/** Fake cordis ctx: synchronous inject, captured logs, dispose hooks, event bus. */
 function makeCtx(seam) {
   const logs = []
   const disposers = []
   const routes = []
+  const bus = new Map()
   return {
     logs,
     disposers,
     routes,
+    /** Fire a cordis event on this fake bus (the plugin's own listeners). */
+    emit: (event, ...args) => {
+      for (const fn of bus.get(event) ?? []) fn(...args)
+    },
+    /** How many listeners the plugin left on one event. */
+    listenerCount: (event) => (bus.get(event) ?? []).length,
     ctx: {
       logger: {
         info: (m) => logs.push(String(m)),
@@ -102,6 +96,7 @@ function makeCtx(seam) {
       },
       on(event, fn) {
         if (event === 'dispose') disposers.push(fn)
+        bus.set(event, [...(bus.get(event) ?? []), fn])
         return () => {}
       },
       inject(services, callback) {
@@ -120,7 +115,6 @@ const BASE_CONFIG = {
   proxyHost: '127.0.0.1',
   proxyPort: 7897,
   proxiedModels: [],
-  multimodalModels: [],
   retries: 3,
   retryIntervalMs: 1000,
   trustedOrigins: [],
@@ -134,14 +128,23 @@ async function flush(times = 3) {
 /** Boot the plugin with an injected official package. */
 async function boot({ stub, config = {} }) {
   __setOfficialProxyForTest(stub.mod)
-  // The seam's registered document is what the live-apply path reads, so it
-  // carries the same values `apply` was configured with.
+  // dsh 0.1.7 reads the live Config accessors directly, so the object `apply`
+  // was configured with is the value every re-apply sees.
   const merged = { ...BASE_CONFIG, ...config }
   const state = makeSeam(merged)
   const harness = makeCtx(state.seam)
   await apply(harness.ctx, merged)
   await flush()
-  return { ...harness, state }
+  return {
+    ...harness,
+    state,
+    // Live edit: the loader commits the write into the live accessors in place
+    // and emits `loader/volatile-update` on this fiber only.
+    liveUpdate: (patch) => {
+      Object.assign(merged, patch)
+      harness.emit('loader/volatile-update', [Object.keys(patch)])
+    },
+  }
 }
 
 // --- detection ---------------------------------------------------------------
@@ -206,7 +209,7 @@ test('splitProxyList mirrors the official separator handling', () => {
 
 test('official engine installs a policy from the card and bypasses the other hosts', async () => {
   const stub = makeOfficialStub()
-  const { logs, state } = await boot({ stub, config: { proxiedModels: ['b-ai/deepseek-v4-flash'] } })
+  const { logs, listenerCount } = await boot({ stub, config: { proxiedModels: ['b-ai/deepseek-v4-flash'] } })
 
   assert.ok(logs.some((line) => line.includes('engine=official')), 'engine detection is logged')
   assert.equal(stub.calls.installs.length, 1, 'the official seam is used exactly once')
@@ -220,7 +223,7 @@ test('official engine installs a policy from the card and bypasses the other hos
 
   const summary = logs.find((line) => line.includes('official policy installed'))
   assert.ok(summary.includes('proxiedHosts=[api.b.ai]'))
-  assert.equal(state.watcherCount(), 1, 'live apply is wired')
+  assert.equal(listenerCount('loader/volatile-update'), 1, 'live apply is wired')
 })
 
 test('an empty selection leaves the official launcher policy untouched', async () => {
@@ -239,10 +242,10 @@ test('a non-http proxy endpoint is refused instead of installing a direct policy
 
 test('re-applying releases the previous overlay before installing the next', async () => {
   const stub = makeOfficialStub()
-  const { state } = await boot({ stub, config: { proxiedModels: ['b-ai/deepseek-v4-flash'] } })
+  const { liveUpdate } = await boot({ stub, config: { proxiedModels: ['b-ai/deepseek-v4-flash'] } })
   assert.equal(stub.calls.disposed, 0)
 
-  state.commit({ proxiedModels: ['xiaomi/mimo-v2.5'] })
+  liveUpdate({ proxiedModels: ['xiaomi/mimo-v2.5'] })
   await flush()
 
   assert.equal(stub.calls.disposed, 1, 'the first overlay is given back')

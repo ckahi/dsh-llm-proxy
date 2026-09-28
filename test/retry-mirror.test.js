@@ -97,13 +97,17 @@ function makeMirrorSeam({ base }) {
 /** Minimal cordis ctx: inject resolves settings (+ webServer for bridge routes). */
 function makeCtx({ seam }) {
   const calls = []
+  const bus = new Map()
   const ctx = {
     logger: {
       info: (m) => calls.push(['info', m]),
       warn: (m) => calls.push(['warn', m]),
       error: (m) => calls.push(['error', m]),
     },
-    on: () => () => {},
+    on: (ev, fn) => {
+      bus.set(ev, [...(bus.get(ev) ?? []), fn])
+      return () => {}
+    },
     inject(services, callback) {
       const sctx = { effect: () => {} }
       for (const service of services) {
@@ -113,7 +117,11 @@ function makeCtx({ seam }) {
       callback(sctx)
     },
   }
-  return { ctx, calls }
+  /** Fire a cordis event on this fake bus (the plugin's own listeners). */
+  const emit = (ev, ...args) => {
+    for (const fn of bus.get(ev) ?? []) fn(...args)
+  }
+  return { ctx, calls, emit }
 }
 
 test('mirror writes retryPolicy for selected models only', async () => {
@@ -139,21 +147,23 @@ test('mirror writes retryPolicy for selected models only', async () => {
   assert.equal(pi.providers.xiaomi.retryPolicy, undefined, 'unselected provider untouched')
 })
 
-test('mirror follows card edits (watch path)', async () => {
+test('mirror follows a volatile card edit', async () => {
   const base = Config({
     proxiedModels: ['deepseek-v4-flash/deepseek-v4-flash'],
     retries: 3,
     retryIntervalMs: 1000,
   })
   const { seam, getPi } = makeMirrorSeam({ base })
-  const { ctx } = makeCtx({ seam })
+  const { ctx, emit } = makeCtx({ seam })
   await apply(ctx, base)
   await tick()
   await tick()
 
-  // User edits the card: retries 3 → 8. The bridge writes the llm-proxy
-  // namespace, which triggers the scope watch → re-mirror.
-  await seam.mutate('llm-proxy', [{ op: 'set', path: ['retries'], value: 8 }])
+  // User edits the card: retries 3 → 8. dsh 0.1.7 commits the write into the
+  // live volatile accessors in place and emits `loader/volatile-update` on this
+  // fiber only, which the mirror listens for.
+  base.retries = 8
+  emit('loader/volatile-update', [['retries']])
   await tick()
   await tick()
 
@@ -168,14 +178,15 @@ test('deselecting a model restores official defaults', async () => {
     retryIntervalMs: 1000,
   })
   const { seam, getPi } = makeMirrorSeam({ base })
-  const { ctx } = makeCtx({ seam })
+  const { ctx, emit } = makeCtx({ seam })
   await apply(ctx, base)
   await tick()
   await tick()
   assert.equal(getPi().providers['deepseek-v4-flash'].retryPolicy.maxRetries, 5, 'mirrored first')
 
   // Deselect every model from the card.
-  await seam.mutate('llm-proxy', [{ op: 'set', path: ['proxiedModels'], value: [] }])
+  base.proxiedModels = []
+  emit('loader/volatile-update', [['proxiedModels']])
   await tick()
   await tick()
 

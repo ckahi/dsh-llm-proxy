@@ -1,11 +1,11 @@
 /**
- * dsh-llm-proxy v4 — host-side settings wiring + bridge tests.
+ * dsh-llm-proxy v5 — host-side settings wiring + bridge tests.
  *
- * Covers: settings-namespace registration and live re-apply (watch), the
- * fallback when no settings seam exists, the loopback-only bridge
- * (describe/mutate/models envelopes, ns gating, revision conflicts,
- * method/peer guards) and the model-list aggregation off the llm-pi-ai /
- * llm-deepseek namespaces. No real network is touched.
+ * Covers: the settings document served from the exported Config (live re-apply
+ * on `loader/volatile-update`), the fallback when no settings service exists,
+ * the loopback-only bridge (describe/mutate/models envelopes, ns gating,
+ * revision conflicts, method/peer guards) and the model-list aggregation off
+ * the llm-pi-ai / llm-deepseek namespaces. No real network is touched.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,6 +26,18 @@ import { __setOfficialProxyForTest } from '../lib/official-proxy.js'
 // one that happens to have @deepseek-ai/dsh-http-proxy on the module path.
 __setOfficialProxyForTest(null)
 
+/** Plain value of a resolved Config field (a volatile field resolves to a live accessor). */
+function plain(value) {
+  return value !== null && typeof value === 'object' && typeof value.get === 'function' ? value.get() : value
+}
+
+/** Plain JSON view of a resolved Config object. */
+function plainConfig(config) {
+  const out = {}
+  for (const [key, value] of Object.entries(config ?? {})) out[key] = plain(value)
+  return out
+}
+
 /** Deep-merge helper for the fake seam's composition resolution. */
 function merge(base, user) {
   const out = { ...base }
@@ -44,7 +56,7 @@ function makeFakeSeam({ base = {}, conflict = false, writable = true, extraNames
   let revision = 0
   const watchers = new Set()
   const registered = new Set()
-  const resolved = () => merge(base, user)
+  const resolved = () => plainConfig(merge(base, user))
   const descriptors = [
     { ns: 'llm-proxy', schema: {}, value: resolved(), base, user: { ...user }, revision },
     ...extraNamespaces,
@@ -88,13 +100,18 @@ function makeFakeSeam({ base = {}, conflict = false, writable = true, extraNames
 /** Fake cordis ctx that resolves an inject([...]) callback synchronously. */
 function makeCtx({ seam, webServer = true }) {
   const calls = []
+  const bus = new Map()
   const ctx = {
     logger: {
       info: (m) => calls.push(['info', m]),
       warn: (m) => calls.push(['warn', m]),
       error: (m) => calls.push(['error', m]),
     },
-    on: (ev, fn) => calls.push(['on', ev, typeof fn]),
+    on: (ev, fn) => {
+      calls.push(['on', ev, typeof fn])
+      bus.set(ev, [...(bus.get(ev) ?? []), fn])
+      return () => {}
+    },
     inject: typeof seam === 'function'
       ? (services, callback) => {
           assert.ok(Array.isArray(services) && services.includes('settings'), 'inject waits for settings')
@@ -109,7 +126,11 @@ function makeCtx({ seam, webServer = true }) {
         }
       : undefined,
   }
-  return { ctx, calls }
+  /** Fire a cordis event on this fake bus (the plugin's own listeners). */
+  const emit = (ev, ...args) => {
+    for (const fn of bus.get(ev) ?? []) fn(...args)
+  }
+  return { ctx, calls, emit }
 }
 
 /** A typical llm-pi-ai namespace view (b.ai-style provider + domestic provider). */
@@ -152,22 +173,26 @@ test('plugin exports name and Config schema', () => {
   assert.equal(typeof Config, 'function')
 })
 
-test('Config defaults match the documented v4 shape', () => {
+test('Config resolves every field to a live accessor with the documented defaults', () => {
   const cfg = Config({})
-  assert.equal(cfg.proxyHost, '127.0.0.1')
-  assert.equal(cfg.proxyPort, 7897)
-  assert.deepEqual(cfg.proxiedModels, [])
-  assert.equal(cfg.retries, 3)
-  assert.equal(cfg.retryIntervalMs, 1000)
+  // dsh 0.1.7 hands a `volatile()` field to apply() as a live accessor — the
+  // handle a committed settings write lands on — so read through `.get()`.
+  assert.equal(typeof cfg.proxyHost.get, 'function', 'volatile field is a live accessor')
+  assert.equal(plain(cfg.proxyHost), '127.0.0.1')
+  assert.equal(plain(cfg.proxyPort), 7897)
+  assert.deepEqual(plain(cfg.proxiedModels), [])
+  assert.equal(plain(cfg.retries), 3)
+  assert.equal(plain(cfg.retryIntervalMs), 1000)
 })
 
-test('apply registers the settings namespace and installs the dispatcher (live)', async () => {
+test('apply serves the settings document from Config and installs the dispatcher (live)', async () => {
   const base = Config({ proxiedModels: ['deepseek-v4-flash/deepseek-v4-flash'] })
-  const { seam, state } = makeFakeSeam({ base, extraNamespaces: [PI_AI_NAMESPACE, DEEPSEEK_NAMESPACE] })
+  const { seam } = makeFakeSeam({ base, extraNamespaces: [PI_AI_NAMESPACE, DEEPSEEK_NAMESPACE] })
   const { ctx, calls } = makeCtx({ seam: () => seam })
   await apply(ctx, base)
-  assert.ok(state.registered.has('llm-proxy'), 'namespace llm-proxy registered')
-  assert.ok(calls.some(([kind, msg]) => kind === 'info' && msg.includes('settings namespace "llm-proxy" registered')), 'registration logged')
+  // dsh 0.1.7 derives the document from the exported Config schema; there is no
+  // namespace registration left to perform.
+  assert.ok(calls.some(([kind, msg]) => kind === 'info' && msg.includes('settings document "llm-proxy" served from Config')), 'document service logged')
   const installLogs = calls.filter(([kind, msg]) => kind === 'info' && msg.includes('RoutingDispatcher'))
   assert.equal(installLogs.length, 1, 'initial install from resolved value')
   assert.ok(installLogs[0][1].includes('api.b.ai'), 'install log shows the proxied host')
@@ -177,16 +202,20 @@ test('apply registers the settings namespace and installs the dispatcher (live)'
   assert.ok(calls.some(([kind, path]) => kind === 'route' && path === `${SETTINGS_BRIDGE_PREFIX}/test`), 'test route mounted')
 })
 
-test('watch re-applies the dispatcher on committed changes', async () => {
+test('a volatile config update re-applies the dispatcher', async () => {
   const base = Config({})
-  const { seam, state } = makeFakeSeam({ base, extraNamespaces: [PI_AI_NAMESPACE, DEEPSEEK_NAMESPACE] })
-  const { ctx, calls } = makeCtx({ seam: () => seam })
+  const { seam } = makeFakeSeam({ base, extraNamespaces: [PI_AI_NAMESPACE, DEEPSEEK_NAMESPACE] })
+  const { ctx, calls, emit } = makeCtx({ seam: () => seam })
   await apply(ctx, base)
   const before = calls.filter(([kind, msg]) => kind === 'info' && msg.includes('RoutingDispatcher')).length
-  // Commit a change through the seam (as the bridge mutate would).
-  await seam.mutate(LLM_PROXY_NAMESPACE, [{ op: 'set', path: ['proxiedModels'], value: ['deepseek-v4-flash/deepseek-v4-flash'] }], undefined)
-  const after = calls.filter(([kind, msg]) => kind === 'info' && msg.includes('RoutingDispatcher')).length
-  assert.equal(after, before + 1, 'one re-install per committed change')
+  // The loader commits a settings write into the live accessors in place and
+  // emits `loader/volatile-update` on this fiber only (cordis-plugin-loader
+  // `_commitVolatile`) — no registered scope, no watch.
+  base.proxiedModels = ['deepseek-v4-flash/deepseek-v4-flash']
+  emit('loader/volatile-update', [['proxiedModels']])
+  const installs = calls.filter(([kind, msg]) => kind === 'info' && msg.includes('RoutingDispatcher'))
+  assert.equal(installs.length, before + 1, 'one re-install per committed change')
+  assert.ok(installs[installs.length - 1][1].includes('api.b.ai'), 're-install took the new selection')
 })
 
 test('apply falls back to patch config without a settings seam', async () => {

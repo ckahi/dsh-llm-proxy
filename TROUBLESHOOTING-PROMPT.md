@@ -26,10 +26,10 @@
 ### 第 1 步 读取实际配置
 
 - `node --version` 记录 Node 版本；`dsh --version` 记录 DSH 版本
-- 读取 `~/.dsh/settings.yaml`，找到 `llm-proxy:` 节，记录实际配置的：
+- 读取 `~/.dsh/profiles/<profile>/cordis.patch.yml`（dsh ≤ 0.1.6 时代在 `~/.dsh/settings.yaml`），找到 `llm-proxy` 那一行，记录实际配置的：
   - `proxyHost` / `proxyPort`（以这里的值为准）
   - `proxiedModels`
-  - `multimodalModels` / `retries` / `retryIntervalMs`
+  - `retries` / `retryIntervalMs`
 - 读取 `~/.dsh/cordis.patch.yml`，确认插件是否已加入 patch 配置
 - 找到 `llm-pi-ai.providers` 和 `llm-deepseek` 节，列出这台机器**实际配置了
   哪些 provider**（不要假设有哪些）
@@ -112,7 +112,6 @@
     "proxyHost": "从配置读取的实际值",
     "proxyPort": 从配置读取的实际值,
     "proxiedModels": ["实际 key 列表"],
-    "multimodalModels": ["实际 key 列表"],
     "retries": 实际值,
     "本机配置的 providers": ["providerId 列表"]
   },

@@ -85,10 +85,10 @@ DSH 里另一个大模型（如有工具权限，可执行命令、读文件）*
 
 ### 第 1 步：读取实际配置
 - `node --version` 记录 Node 版本；`dsh --version` 记录 DSH 版本
-- 读取 `~/.dsh/settings.yaml`，找到 `llm-proxy:` 节，记录用户实际配置的：
+- 读取 `~/.dsh/profiles/<profile>/cordis.patch.yml`（dsh ≤ 0.1.6 时代在 `~/.dsh/settings.yaml`），找到 `llm-proxy` 那一行，记录用户实际配置的：
   - `proxyHost` / `proxyPort`（代理地址，这是用户自己配的，以这里的值为准）
   - `proxiedModels`（走代理的模型 key，格式为 <providerId>/<modelId>）
-  - `multimodalModels` / `retries` / `retryIntervalMs`
+  - `retries` / `retryIntervalMs`
 - 读取 `~/.dsh/cordis.patch.yml`，确认插件是否已加入 patch 配置
 - 找到 `llm-pi-ai.providers` 和 `llm-deepseek` 节，列出**这台机器实际配置了哪些 provider**（不要假设有哪些）
 
@@ -147,7 +147,6 @@ DSH 里另一个大模型（如有工具权限，可执行命令、读文件）*
     "proxyHost": "从配置读取的实际值",
     "proxyPort": 从配置读取的实际值,
     "proxiedModels": ["实际 key 列表"],
-    "multimodalModels": ["实际 key 列表"],
     "retries": 实际值,
     "本机配置的 providers": ["providerId 列表"]
   },
@@ -212,7 +211,7 @@ DSH 里另一个大模型（如有工具权限，可执行命令、读文件）*
 收到排查大模型的报告后，确认包含全部内容：
 
 - [ ] **环境信息**：操作系统、Node 版本、DSH 版本、插件版本
-- [ ] **实际配置**：从你机器读出的 proxyHost/proxyPort、proxiedModels、multimodalModels、retries、实际 providers（而非任何默认值）
+- [ ] **实际配置**：从你机器读出的 proxyHost/proxyPort、proxiedModels、retries、实际 providers（而非任何默认值）
 - [ ] **插件安装与设置卡状态**
 - [ ] **日志核查**：global dispatcher 行、proxy= 是否等于实际配置、proxiedHosts 是否非空
 - [ ] **每步检查记录**：命令、实际输出、结论

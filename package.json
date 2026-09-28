@@ -1,7 +1,7 @@
 {
   "name": "@superfish058/dsh-llm-proxy",
-  "version": "1.4.0",
-  "description": "DSH 模型代理插件：按模型走代理（Clash 等），有官方出站代理包时复用其传输层，设置页实时生效。",
+  "version": "1.5.0",
+  "description": "DSH 模型代理插件：按模型走代理（Clash 等），有官方出站代理包时复用其传输层，设置 → 插件 页实时生效（dsh 0.1.7）。",
   "author": "superfish058",
   "repository": {
     "type": "git",
@@ -24,6 +24,7 @@
     "src",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -31,7 +32,7 @@
     "prepare": "tsdown",
     "build:watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/routing-dispatcher.test.js test/settings.test.js test/retry-mirror.test.js test/multimodal-mirror.test.js test/connection-test.test.js test/official-proxy.test.js",
+    "test": "node --test test/routing-dispatcher.test.js test/settings.test.js test/retry-mirror.test.js test/connection-test.test.js test/official-proxy.test.js",
     "test:client": "node test/client-build.test.js",
     "test:smoke": "node test/smoke-test.mjs",
     "test:load": "node test/load-test.mjs",
@@ -65,17 +66,16 @@
     },
     "client": {
       "inject": [
-        "slots",
-        "locale",
-        "settingsScope",
-        "remote"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
     }
   },
   "dependencies": {
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.7",
-    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "undici": "^8.10.0"
   },
   "peerDependencies": {
@@ -88,7 +88,6 @@
     "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.5",

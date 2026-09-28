@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs'
 const s = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 const checks = {
   'ModuleLoader handoff': s.includes('window.__ModuleLoader__.load'),
-  'bundle id dsh-llm-proxy': /load\(\{\s*id: "dsh-llm-proxy"/.test(s),
+  'bundle id dsh-llm-proxy': /load\(\{\s*id: "@superfish058\/dsh-llm-proxy"/.test(s),
   'apply exported': /exports\.apply\s*=/.test(s),
   'inject exported': /exports\.inject\s*=/.test(s),
-  'settings.plugin.item registered': s.includes('settings.plugin.item'),
-  'card id llm-proxy': s.includes('"llm-proxy"'),
+  'plugins.item registered': s.includes('plugins.item'),
+  'page id llm-proxy': s.includes('"llm-proxy"'),
+  'configForms bound': s.includes('configForms'),
   'bridge prefix': s.includes('/api/dsh-llm-proxy/settings'),
   'locale zh keys': s.includes('模型代理'),
 }

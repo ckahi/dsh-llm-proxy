@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.0 (2026-09-28)
+
+- **适配 dsh 0.1.7 的设置模型（重要，修复「renderer boot failed」）**。0.1.7 把客户端设置服务从 `settingsScope` 改名为 `configForms`，并按 **Loader entry id**（本插件即 `llm-proxy`）寻址设置文档；旧代码硬 `inject` 已不存在的服务名，cordis fiber 永远停在 pending，启动审计因此只能报「The client Loader did not provide an error message. RendererStartupFailure」。现在客户端改为 `ctx.inject(['configForms'], …)` 动态等待该服务——服务缺失时插件照常启动、只是不显示设置页，未来再改名也不会再把启动拖垮。
+- **宿主侧不再自建命名空间**：`Config` 的每个字段都标成 `volatile()`（经 `live()` 包装，老 schemastery 上优雅降级并告警），该 schema 本身即 `llm-proxy` 设置文档；loader 把 volatile 字段作为 live accessor 交给 `apply()`，写入直接落在这份 accessor 上。插件监听 fiber 过滤的 `loader/volatile-update` 重算代理策略（`settings/document-updated` 作为 provider 文档变更的补充信号），不再有 `settings.register()` / `watch()` 这套 0.1.7 已删除的接缝。
+- **设置页搬到 Plugins 页**：注册槽位由 `settings.plugin.item`（keyed）改为 `plugins.item`（list，`id`/`order`/`label`），与官方 `settings-web-search` 同构（`order: 50` 排在官方页之后）；卡片在 `configForms.whileServed(['llm-proxy'])` 下注册，宿主不提供该文档时不显示任何痕迹。`dsh.client.inject` 同步改为客户端包名（原先写的是服务名，从未生效）。
+- **移除「多模态模型镜像」**：dsh 0.1.7 起模型图片输入由官方模型设置与 provider 配置直接管理，插件不再代写 `input` / `inputModalities`（`multimodalModels` 字段、宿主镜像逻辑、卡片区段、`multimodal` 测试标志与 `test/multimodal-mirror.test.js` 一并删除）。
+- **保留**：按模型走代理（官方 `dsh-http-proxy` 优先 / 自带 `RoutingDispatcher` 回退）、`retries`/`retryIntervalMs` 的官方 `retryPolicy` 镜像、模型列表与「测试连接」桥接（`/api/dsh-llm-proxy/settings` 的 `describe`/`mutate`/`models`/`test` 保留，作为官方 `configForms` 不可达时的兜底），反代 `trustedOrigins` 白名单。
+- 依赖：`@deepseek-ai/schemastery` 提到 `^3.18.4`（`Schema#volatile` 从该版本起才有）；测试同步改造（无 seam 场景、`Config` 解析为 live accessor、`loader/volatile-update` 驱动重算），全套 **73** 个用例通过。
+
 ## v1.4.0 (2026-09-10)
 
 - **官方优先：复用官方出站代理层（重要）**。检测到官方 `@deepseek-ai/dsh-http-proxy`（随 dsh ≥ 0.1.3 安装，是库不是插件）时，插件不再自建全局 dispatcher，而是通过官方公开接缝 `installProxyFromEnvironment(envLookup, report)` 喂一份算好的策略：`https_proxy` / `http_proxy` 取自设置卡的代理地址，`no_proxy` = 除勾选模型之外的所有已配置 provider 主机。官方自己的匹配器、子进程环境发布、web-fetch 例外语义全部保留，插件只负责官方不提供的那一个决定——「哪个模型走代理」。卸载时把 launcher 原本的策略原样还回去。

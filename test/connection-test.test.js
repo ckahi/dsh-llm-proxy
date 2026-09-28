@@ -3,7 +3,7 @@
  *
  * Covers: target resolution (llm-pi-ai explicit + catalog, llm-deepseek,
  * apiKey inline vs apiKeyEnv), the probe mapping (2xx / 401 / 404 / 429 /
- * 5xx / network / timeout), viaProxy + multimodal flags from the llm-proxy
+ * 5xx / network / timeout), the viaProxy flag from the llm-proxy
  * config, and the bridge /test route envelope. No real network is touched.
  */
 import { test } from 'node:test'
@@ -18,14 +18,14 @@ import {
 } from '../lib/connection-test.js'
 
 /** Build a fake settings seam with an llm-proxy view + optional provider views. */
-function makeSeam({ proxiedModels = [], multimodalModels = [], providers, deepseek = {}, documentPath } = {}) {
+function makeSeam({ proxiedModels = [], providers, deepseek = {}, documentPath } = {}) {
   const descriptors = [
     {
       ns: 'llm-proxy',
       schema: {},
       base: {},
       user: {},
-      value: { ...Config({}), proxiedModels, multimodalModels },
+      value: { ...Config({}), proxiedModels },
       revision: 0,
     },
   ]
@@ -207,10 +207,9 @@ test('runConnectionTest truncates long provider error bodies', async () => {
 })
 
 
-test('runConnectionTest reports success with viaProxy + multimodal flags', async () => {
+test('runConnectionTest reports success with the viaProxy flag', async () => {
   const seam = makeSeam({
     proxiedModels: [BAI_KEY],
-    multimodalModels: [BAI_KEY],
     providers: BAI_PROVIDERS,
   })
   const calls = []
@@ -224,7 +223,6 @@ test('runConnectionTest reports success with viaProxy + multimodal flags', async
   assert.equal(outcome.ok, true)
   assert.equal(outcome.status, 200)
   assert.equal(outcome.viaProxy, true)
-  assert.equal(outcome.multimodal, true)
   assert.equal(typeof outcome.latencyMs, 'number')
   assert.equal(calls.length, 1)
   const request = calls[0]
@@ -290,7 +288,6 @@ test('runConnectionTest reports a missing credential', async () => {
 test('bridge handlers serve the test outcome without leaking secrets', async () => {
   const seam = makeSeam({
     proxiedModels: [BAI_KEY],
-    multimodalModels: [BAI_KEY],
     providers: BAI_PROVIDERS,
   })
   const handlers = makeBridgeHandlers(seam, {

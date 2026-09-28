@@ -1,13 +1,13 @@
 /**
- * rc.6-compatible settings scope for dsh-llm-proxy.
+ * Settings scope for dsh-llm-proxy.
  *
- * rc.6 host-apiproxy serves only a hard-coded namespace allowlist, so the
- * official settings scope answers "unavailable" for the `llm-proxy`
- * namespace. This binder wraps the official scope: when it reports the
- * namespace ready the wrapper is a pass-through; when it reports
- * unavailable, a same-origin bridge controller takes over and serves the
- * same SettingsScope contract from this package's host-side bridge routes
- * (/api/dsh-llm-proxy/settings). The Host keeps the bridge loopback-only.
+ * dsh 0.1.7 serves a plugin's settings document through the shared
+ * `configForms` service, addressed by the plugin's Loader entry id
+ * (`llm-proxy`); the old `settingsScope` binder is gone. This module adapts
+ * that service to the `ProxyModelScope` face the card consumes, and keeps the
+ * package's own loopback bridge as a fallback for a host whose official
+ * document is unreachable (the bridge reads and writes the same entry id, so
+ * both paths land on the same Host document).
  */
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -59,7 +59,6 @@ export interface TestResult {
   status?: number
   latencyMs?: number
   viaProxy?: boolean
-  multimodal?: boolean
   code?: string
   message?: string
 }
@@ -416,27 +415,77 @@ function createCompatScope(primary: OfficialScopeFace, fetchFn: typeof fetch): P
   }
 }
 
-/** True when the value exposes the official settings binder's bind() seam. */
-function isBinderFace(value: unknown): value is { bind(spec: { namespace: string }): OfficialScopeFace } {
-  return typeof value === 'object' && value !== null && typeof (value as { bind?: unknown }).bind === 'function'
+/**
+ * The shared form dsh 0.1.7's `configForms` service returns for one entry.
+ * `set`/`unset` resolve false on a Host refusal (revision conflict, no
+ * writable document) instead of rejecting.
+ */
+export interface ConfigFormFace {
+  getSnapshot(): unknown
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<boolean>
+  dispose(): Promise<void> | void
+}
+
+/** The `configForms` service surface this plugin consumes. */
+export interface ConfigFormsSurface {
+  /** The form of one Host plugin entry id. */
+  get(entryId: string): ConfigFormFace
+  /** Run `register` while the Host serves any of these namespaces. */
+  whileServed(namespaces: readonly string[], register: () => unknown): () => void
 }
 
 /**
- * The rc.6 compatibility binder, provided as the `llmProxySettings` service.
- * Rides the official binder first and hands the bridge controller in only
- * when the official scope settles as unavailable, so official behaviour stays
- * untouched wherever it works and the Host remains the authority.
+ * Reach the settings service on a context, or undefined when this host does
+ * not provide it (the caller stays inert instead of failing its own fiber).
+ */
+export function configFormsOf(ctx: Context): ConfigFormsSurface | undefined {
+  const service = ctx.get('configForms') as unknown
+  if (typeof service !== 'object' || service === null) return undefined
+  const record = service as { get?: unknown; whileServed?: unknown }
+  if (typeof record.get !== 'function' || typeof record.whileServed !== 'function') return undefined
+  return service as ConfigFormsSurface
+}
+
+/**
+ * The settings scope binder, provided as the `llmProxySettings` service.
+ * Rides the official `configForms` document first and hands the bridge
+ * controller in only while that document is not ready, so official behaviour
+ * stays untouched wherever it works and the Host remains the authority.
  */
 export class LlmProxySettingsBinder extends Service {
   constructor(ctx: Context) {
     super(ctx, 'llmProxySettings')
   }
 
-  bind(): ProxyModelScope {
+  /**
+   * Bind the llm-proxy settings document.
+   * @param forms - the configForms service (see {@link configFormsOf}).
+   * @returns the composite scope the card consumes.
+   */
+  bind(forms: ConfigFormsSurface): ProxyModelScope {
     const ctx = this.ctx
-    const official = ctx.get('settingsScope') as unknown
-    if (!isBinderFace(official)) throw new Error('llmProxySettings: the official settingsScope binder is unavailable')
-    const primary = official.bind({ namespace: LLM_PROXY_NAMESPACE })
+    // dsh 0.1.7 addresses a settings document by its Loader entry id, which is
+    // this plugin's `llm-proxy` row in the profile's cordis.patch.yml.
+    const form = forms.get(LLM_PROXY_NAMESPACE)
+    const primary: OfficialScopeFace = {
+      getSnapshot: () => form.getSnapshot(),
+      subscribe: (listener) => form.subscribe(listener),
+      set: async (field, value) => {
+        if (!await form.set(field, value)) throw new Error('llm-proxy: the Host refused the write')
+      },
+      unset: async (field) => {
+        if (!await form.unset(field)) throw new Error('llm-proxy: the Host refused the clear')
+      },
+      // The shared describe mirror loads itself — ConfigForms.get() already
+      // asked it to — and refolds on every Host update, so there is nothing to
+      // pull from here.
+      load: () => Promise.resolve(),
+      // The service owns the form for the whole page; disposing it here would
+      // break every other consumer.
+      dispose: () => Promise.resolve(),
+    }
     const scope = createCompatScope(primary, (input, init) => fetch(input, init))
     ctx.effect(() => {
       const remote = ctx.get('remote') as { $on?: (event: string, listener: (ns?: string) => void) => () => void } | undefined

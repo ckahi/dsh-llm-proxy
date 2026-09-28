@@ -1,23 +1,22 @@
 /**
- * 模型代理 plugin card: one card inside 设置 → 插件 → 可配置插件
- * (the `settings.plugin.item` slot, declared at runtime by
- * @deepseek-ai/dsh-client-ui-settings-plugins). The header names the plugin
- * and discloses the configurable items in place — the proxy endpoint
+ * 模型代理 page: the card registered into 设置 → 插件 (`plugins.item`), the
+ * configurable-plugin tab the Plugins page owns. The header names the plugin
+ * and the body discloses the configurable items in place — the proxy endpoint
  * (host + port), the 走代理的模型 multi-select (populated from the configured
  * model list via the host bridge), and the retry policy (retries + interval).
- * Written through the llm-proxy settings scope (official path with the rc.6
- * bridge fallback). Changes apply live on the host — no restart needed.
+ * Written through the llm-proxy settings scope (official `configForms` path
+ * with the package's loopback bridge as fallback). Changes apply live on the
+ * host — no restart needed.
  *
  * Everything else stays on the DIRECT path by default; only the selected
  * models' baseURL hosts route through the proxy. Loopback is always direct.
+ * Model image input is owned by the official Models page (dsh ≥ 0.1.7), so
+ * this card no longer mirrors input modalities.
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-// Type-only: pulls the ui-settings-plugins SlotMap merge (the
-// 'settings.plugin.item' entry the configurable tab declares at runtime).
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {
   FieldWrite, ProxyModelRow, ProxyModelScope, ProxyModelSnapshot, TestResult,
 } from './settings-scope.ts'
@@ -36,7 +35,7 @@ export interface ProxyModelCardInjected {
 
 /** Props delivered by the slot outlet (inject face spread flat). */
 export type ProxyModelCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'plugins.item'>
   & InjectFace<ProxyModelCardInjected>
 
 /** The resolved llm-proxy config shape (mirrors lib/index.js Config). */
@@ -44,7 +43,6 @@ interface ProxyConfig {
   proxyHost: string
   proxyPort: number
   proxiedModels: string[]
-  multimodalModels: string[]
   retries: number
   retryIntervalMs: number
 }
@@ -54,20 +52,18 @@ const DEFAULTS: ProxyConfig = {
   proxyHost: '127.0.0.1',
   proxyPort: 7897,
   proxiedModels: [],
-  multimodalModels: [],
   retries: 3,
   retryIntervalMs: 1000,
 }
 
 /** Fields surfaced in the UI, in write order. */
-const UI_FIELDS = ['proxyHost', 'proxyPort', 'proxiedModels', 'multimodalModels', 'retries', 'retryIntervalMs'] as const
+const UI_FIELDS = ['proxyHost', 'proxyPort', 'proxiedModels', 'retries', 'retryIntervalMs'] as const
 
 /** The draft form state backing the manual-entry fields. */
 interface FormState {
   proxyHost: string
   proxyPort: string
   proxiedModels: string[]
-  multimodalModels: string[]
   retries: string
   retryIntervalMs: string
 }
@@ -83,7 +79,6 @@ function emptyForm(): FormState {
     proxyHost: '',
     proxyPort: String(DEFAULTS.proxyPort),
     proxiedModels: [],
-    multimodalModels: [],
     retries: String(DEFAULTS.retries),
     retryIntervalMs: String(DEFAULTS.retryIntervalMs),
   }
@@ -95,7 +90,6 @@ function formFromConfig(value: ProxyConfig): FormState {
     proxyHost: value.proxyHost ?? '',
     proxyPort: String(value.proxyPort ?? DEFAULTS.proxyPort),
     proxiedModels: [...(value.proxiedModels ?? [])],
-    multimodalModels: [...(value.multimodalModels ?? [])],
     retries: String(value.retries ?? DEFAULTS.retries),
     retryIntervalMs: String(value.retryIntervalMs ?? DEFAULTS.retryIntervalMs),
   }
@@ -107,7 +101,6 @@ function fieldFromForm(form: FormState, field: (typeof UI_FIELDS)[number]): unkn
     case 'proxyHost': return form.proxyHost.trim()
     case 'proxyPort': return Number(form.proxyPort)
     case 'proxiedModels': return [...form.proxiedModels]
-    case 'multimodalModels': return [...form.multimodalModels]
     case 'retries': return Number(form.retries)
     case 'retryIntervalMs': return Number(form.retryIntervalMs)
   }
@@ -148,7 +141,6 @@ function mergeDefaults(base: Partial<ProxyConfig> | undefined): ProxyConfig {
     proxyHost: base?.proxyHost ?? DEFAULTS.proxyHost,
     proxyPort: base?.proxyPort ?? DEFAULTS.proxyPort,
     proxiedModels: base?.proxiedModels ?? DEFAULTS.proxiedModels,
-    multimodalModels: base?.multimodalModels ?? DEFAULTS.multimodalModels,
     retries: base?.retries ?? DEFAULTS.retries,
     retryIntervalMs: base?.retryIntervalMs ?? DEFAULTS.retryIntervalMs,
   }
@@ -277,14 +269,6 @@ function CardBody(props: Required<ProxyModelCardInjected>): ReactNode {
     setForm({ ...form, proxiedModels: selected })
   }
 
-  const toggleMultimodal = (key: string): void => {
-    setSaved(false)
-    const selected = form.multimodalModels.includes(key)
-      ? form.multimodalModels.filter((k) => k !== key)
-      : [...form.multimodalModels, key]
-    setForm({ ...form, multimodalModels: selected })
-  }
-
   const handleTest = async (key: string): Promise<void> => {
     setTestingKey(key)
     const result = await scope.test(key)
@@ -292,14 +276,13 @@ function CardBody(props: Required<ProxyModelCardInjected>): ReactNode {
     setTestingKey(null)
   }
 
-  /** One-line test detail: ✓ 连接成功 · 200 · 38ms · 经代理 · 多模态已开启 / ✗ 连接失败：… */
+  /** One-line test detail: ✓ 连接成功 · 200 · 38ms · 经代理 / ✗ 连接失败：… */
   const formatTestDetail = (result: TestResult): string => {
     if (result.ok) {
       const parts: string[] = []
       if (typeof result.status === 'number') parts.push(String(result.status))
       if (typeof result.latencyMs === 'number') parts.push(`${result.latencyMs}ms`)
       parts.push(result.viaProxy ? t('testViaProxy') : t('testDirect'))
-      if (result.multimodal) parts.push(t('testMultimodalOn'))
       return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
     }
     return `：${result.message ?? result.code ?? t('testFail')}`
@@ -416,53 +399,6 @@ function CardBody(props: Required<ProxyModelCardInjected>): ReactNode {
         )}
       </div>
 
-      <div className={styles.field}>
-        <span className={styles.fieldLabel}>{t('fieldMultimodalModels')}</span>
-        <span className={styles.fieldHint}>{t('fieldMultimodalModelsHint')}</span>
-        {modelsError !== null
-          ? <p className={styles.status}>{modelsError}</p>
-          : models.length === 0
-            ? <p className={styles.status}>{t('statusLoading')}</p>
-            : (
-              <ul className={styles.rowList}>
-                {form.multimodalModels.map((key) => {
-                  const row = models.find((m) => m.key === key)
-                  return (
-                    <li key={key} className={styles.row}>
-                      <span className={styles.rowLabel}>{row ? rowLabel(row) : key}</span>
-                      <button
-                        type="button"
-                        className={styles.rowRemove}
-                        data-testid="remove-multimodal-model"
-                        onClick={() => toggleMultimodal(key)}
-                      >
-                        {t('remove')}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-        <select
-          className={styles.select}
-          data-testid="add-multimodal-model"
-          value=""
-          disabled={models.length === 0}
-          onChange={(event) => {
-            if (event.target.value !== '') toggleMultimodal(event.target.value)
-          }}
-        >
-          <option value="">{t('selectModel')}</option>
-          {models
-            .filter((row) => !form.multimodalModels.includes(row.key))
-            .map((row) => (
-              <option key={row.key} value={row.key}>
-                {rowLabel(row)}{row.inputModalities.includes('image') ? `（${t('multimodalBadge')}）` : ''}
-              </option>
-            ))}
-        </select>
-      </div>
-
       <div className={styles.fieldRow}>
         <TextField
           label={t('fieldRetries')}
@@ -517,14 +453,15 @@ function CardBody(props: Required<ProxyModelCardInjected>): ReactNode {
 }
 
 /**
- * The 模型代理 plugin card: a header naming the plugin over a line describing
- * what its settings govern, disclosing the configurable items in place.
+ * The 模型代理 page body: a header naming the plugin over a line describing
+ * what its settings govern, disclosing the configurable items in place. It
+ * opens expanded because the Plugins page already spent one click on the tab.
  * Renders nothing (returns null) until the slot outlet supplies the inject
- * face; the section itself stacks cards and reports their count.
+ * face.
  */
 export function ProxyModelCard(props: ProxyModelCardProps): ReactNode {
   const { scope, useSnapshot, t } = props
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   if (scope === undefined || useSnapshot === undefined || t === undefined) return null
   return (
     <li className={styles.card}>
