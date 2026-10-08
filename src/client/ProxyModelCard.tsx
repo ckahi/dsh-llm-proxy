@@ -1,7 +1,7 @@
 /**
- * 模型代理 page: the card registered into 设置 → 插件 (`settings.plugin.item`,
- * keyed by the `llm-proxy` namespace), the configurable-plugin tab the Plugins
- * page owns. The header names the plugin
+ * 模型代理 card: registered into the Plugins page (dsh 0.2.0 official seat
+ * `plugins.bundle.config`, or the web-all family seat `web-ui.plugin.item`).
+ * The header names the plugin
  * and the body discloses the configurable items in place — the proxy endpoint
  * (host + port), the 走代理的模型 multi-select (populated from the configured
  * model list via the host bridge), and the retry policy (retries + interval).
@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   FieldWrite, ProxyModelRow, ProxyModelScope, ProxyModelSnapshot, TestResult,
 } from './settings-scope.ts'
@@ -34,10 +34,12 @@ export interface ProxyModelCardInjected {
   t: (key: keyof typeof en) => string
 }
 
-/** Props delivered by the slot outlet (inject face spread flat). */
+/** Props delivered by the slot outlet (inject face spread flat). The card
+ * registers into either the official `plugins.bundle.config` keyed seat or the
+ * web-all family list seat, so the slot-runtime props stay untyped here. */
 export type ProxyModelCardProps =
-  PropsRuntime<'settings.plugin.item'>
-  & InjectFace<ProxyModelCardInjected>
+  InjectFace<ProxyModelCardInjected>
+  & Record<string, unknown>
 
 /** The resolved llm-proxy config shape (mirrors lib/index.js Config). */
 interface ProxyConfig {

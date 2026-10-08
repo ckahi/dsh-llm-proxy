@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.5.2 (unreleased)
+
+- **适配 dsh 0.2.0 正式插件卡片座位（修复「设置里没有插件入口、卡片不出」）**：0.2.0 把插件页搬到主界面（`@deepseek-ai/dsh-client-ui-plugin-manager` 注入 `main`），bundle 配置卡片座位为 `plugins.bundle.config`（keyed，**key = 插件包名** `@superfish058/dsh-llm-proxy`）。同时兼容替换型 Web UI（如 `@linxin666/dsh-web-all`）：其 `dsh-web-settings` 组加载期间（探测 `webUiSettings` 服务）卡片改挂家庭座位 `web-ui.plugin.item`（list，id/order/label），并在每次 `slots/changed` 时重判、先 dispose 后重挂，保证卡片从不同时出现在两个座位。注册仍包在 `configForms.whileServed(['llm-proxy'])` 门控内。v1.5.1 曾适配的 `settings.plugin.item` 是 alpha.1 的过渡座位（alpha.2 已删），正式版不适用。
+
 ## v1.5.1 (unreleased)
 
 - **修复 v1.5.0 cordis.patch.yml 重复 insert 块**（启动报 `duplicate loader entry id "llm-proxy"`）：文件里同一 `insert` 块被意外写了两次，宿主组合 profile 时出现两条同 id 行，加载器直接抛错。纯删除，无值变更。

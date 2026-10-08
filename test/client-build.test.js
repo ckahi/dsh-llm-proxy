@@ -14,12 +14,12 @@ test('client bundle is built and well-formed', () => {
   const source = readFileSync(path, 'utf8')
   assert.ok(source.includes('window.__ModuleLoader__.load'), 'loader handoff present')
   assert.ok(source.includes('"@superfish058/dsh-llm-proxy"'), 'scoped bundle id stamped')
-  assert.ok(source.includes('settings.plugin.item'), 'settings.plugin.item card registration present')
-  // dsh 0.2.0: the Plugins page dispatches keyed cards by settings namespace,
-  // and the settings document is served by the shared configForms service —
-  // the 0.1.7 list-slot name must be gone.
-  assert.ok(source.includes('"llm-proxy"'), 'card key present')
+  assert.ok(source.includes('plugins.bundle.config'), 'official bundle-config seat present')
+  assert.ok(source.includes('web-ui.plugin.item'), 'web-all family seat present')
+  // dsh 0.2.0: the official Plugins page is a main-UI surface keyed by the
+  // bundle package name; the interim keyed settings seat must be gone.
   assert.ok(source.includes('configForms'), 'configForms binding present')
+  assert.ok(!source.includes('settings.plugin.item'), 'alpha.1 settings seat removed')
   assert.ok(!/inject\("plugins\.item"|name: "plugins\.item"/.test(source), '0.1.7 slot name removed')
   assert.ok(!/exports\.inject\s*=\s*\[[^\]]*settingsScope/.test(source), 'rc.7 settingsScope service name removed')
   assert.ok(/exports\.apply\s*=/.test(source), 'apply exported')

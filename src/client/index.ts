@@ -41,12 +41,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
   interface SlotMap {
     /**
-     * One configurable plugin card (keyed slot, root scope), declared at
-     * runtime by @deepseek-ai/dsh-client-ui-settings-plugins and keyed by the
-     * edited settings namespace. Declared here so this package keeps
-     * compiling without that package's typings installed.
+     * The official bundle-configuration seat (dsh 0.2.0 plugin-manager page,
+     * keyed by the bundle's package name) and the web-all family list seat.
+     * Both declared at runtime by their owning pages; declared here so this
+     * package keeps compiling without those packages' typings installed.
      */
-    'settings.plugin.item': { kind: 'keyed', scope: 'root' }
+    'plugins.bundle.config': { kind: 'keyed', scope: 'root' };
+    'web-ui.plugin.item': { kind: 'list', scope: 'root' };
   }
 }
 
@@ -78,14 +79,63 @@ export function apply(ctx: ClientContext): void {
 
     // The card exists only while the Host serves this plugin's settings
     // document (entry id `llm-proxy`): a deployment that does not compose this
-    // plugin shows no trace of it. Keyed by the namespace — the tab pairs the
-    // card with the served namespace it claims (dsh 0.2.0 slot contract).
-    child.effect(() => forms.whileServed([LLM_PROXY_NAMESPACE], () => child.slots.inject('settings.plugin.item', () => child.slots.register({
-      name: 'settings.plugin.item',
-      key: LLM_PROXY_NAMESPACE,
-      order: 50,
-      locale: NS,
-      inject: injected,
-    }, ProxyModelCard))), 'dsh-llm-proxy: settings page')
+    // plugin shows no trace of it.
+    //
+    // dsh 0.2.0 moved the Plugins page to a main-UI surface
+    // (@deepseek-ai/dsh-client-ui-plugin-manager) whose bundle-configuration
+    // seat `plugins.bundle.config` is keyed by the BUNDLE's PACKAGE NAME.
+    // Replacements of the web shell (e.g. @linxin666/dsh-web-all) host their
+    // own list seat `web-ui.plugin.item` and expose a `webUiSettings` service
+    // while loaded — the same dual-seat contract the web-all family plugins
+    // follow: land on the official seat, move to the family seat the moment
+    // the group is live, re-evaluated on every `slots/changed`. The entry is
+    // disposed before the replacement registers, so the card is never in two
+    // seats at once.
+    const BUNDLE_PACKAGE_NAME = '@superfish058/dsh-llm-proxy'
+    const OFFICIAL_SEAT = 'plugins.bundle.config'
+    const FAMILY_SEAT = 'web-ui.plugin.item'
+    const familyGroupLoaded = (): boolean => {
+      try {
+        return (child as unknown as { get(name: string): unknown }).get('webUiSettings') !== undefined
+      } catch {
+        return false
+      }
+    }
+    child.effect(() => forms.whileServed([LLM_PROXY_NAMESPACE], () => {
+      let dispose: (() => void) | undefined
+      let current: string | undefined
+      let reconciling = false
+      const register = (name: string, options: Record<string, unknown>): void => {
+        dispose = child.slots.inject(name as typeof OFFICIAL_SEAT | typeof FAMILY_SEAT, () => child.slots.register({
+          name,
+          locale: NS,
+          inject: injected,
+          ...options,
+        } as Parameters<typeof child.slots.register>[0], ProxyModelCard as never))
+      }
+      const reconcile = (): void => {
+        if (reconciling) return
+        const target = familyGroupLoaded() ? FAMILY_SEAT : OFFICIAL_SEAT
+        if (current === target) return
+        reconciling = true
+        const previous = dispose
+        dispose = undefined
+        current = undefined
+        previous?.()
+        try {
+          register(target, target === FAMILY_SEAT
+            ? { id: LLM_PROXY_NAMESPACE, order: 50, label: () => t('title') }
+            : { key: BUNDLE_PACKAGE_NAME })
+          current = target
+        } finally {
+          reconciling = false
+        }
+      }
+      try {
+        child.on('slots/changed', () => { reconcile() })
+      } catch { /* older hosts: the initial reconcile below still applies */ }
+      reconcile()
+      return () => { dispose?.() }
+    }), 'dsh-llm-proxy: settings page')
   })
 }
