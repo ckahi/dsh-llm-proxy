@@ -1,6 +1,7 @@
 /**
- * 模型代理 page: the card registered into 设置 → 插件 (`plugins.item`), the
- * configurable-plugin tab the Plugins page owns. The header names the plugin
+ * 模型代理 page: the card registered into 设置 → 插件 (`settings.plugin.item`,
+ * keyed by the `llm-proxy` namespace), the configurable-plugin tab the Plugins
+ * page owns. The header names the plugin
  * and the body discloses the configurable items in place — the proxy endpoint
  * (host + port), the 走代理的模型 multi-select (populated from the configured
  * model list via the host bridge), and the retry policy (retries + interval).
@@ -35,7 +36,7 @@ export interface ProxyModelCardInjected {
 
 /** Props delivered by the slot outlet (inject face spread flat). */
 export type ProxyModelCardProps =
-  PropsRuntime<'plugins.item'>
+  PropsRuntime<'settings.plugin.item'>
   & InjectFace<ProxyModelCardInjected>
 
 /** The resolved llm-proxy config shape (mirrors lib/index.js Config). */

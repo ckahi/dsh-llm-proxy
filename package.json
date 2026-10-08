@@ -1,6 +1,6 @@
 {
   "name": "@superfish058/dsh-llm-proxy",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "DSH 模型代理插件：按模型走代理（Clash 等），有官方出站代理包时复用其传输层，设置 → 插件 页实时生效（dsh 0.1.7）。",
   "author": "superfish058",
   "repository": {

@@ -6,7 +6,7 @@ const checks = {
   'bundle id dsh-llm-proxy': /load\(\{\s*id: "@superfish058\/dsh-llm-proxy"/.test(s),
   'apply exported': /exports\.apply\s*=/.test(s),
   'inject exported': /exports\.inject\s*=/.test(s),
-  'plugins.item registered': s.includes('plugins.item'),
+  'settings.plugin.item registered': /name: "settings\.plugin\.item"/.test(s),
   'page id llm-proxy': s.includes('"llm-proxy"'),
   'configForms bound': s.includes('configForms'),
   'bridge prefix': s.includes('/api/dsh-llm-proxy/settings'),

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.1 (unreleased)
+
+- **修复 v1.5.0 cordis.patch.yml 重复 insert 块**（启动报 `duplicate loader entry id "llm-proxy"`）：文件里同一 `insert` 块被意外写了两次，宿主组合 profile 时出现两条同 id 行，加载器直接抛错。纯删除，无值变更。
+- **适配 dsh 0.2.0 的 Plugins 页槽位改名**：卡片槽位由 `plugins.item`（list，`id`/`order`/`label`）改回 `settings.plugin.item`（keyed，`key: 'llm-proxy'`），卡片在 `configForms.whileServed(['llm-proxy'])` 下注册不变。不改则宿主侧一切正常（设置文档照常 serve、bridge 照常挂载），但设置页只显示插件标题、不出卡片。
+
 ## v1.5.0 (2026-09-28)
 
 - **适配 dsh 0.1.7 的设置模型（重要，修复「renderer boot failed」）**。0.1.7 把客户端设置服务从 `settingsScope` 改名为 `configForms`，并按 **Loader entry id**（本插件即 `llm-proxy`）寻址设置文档；旧代码硬 `inject` 已不存在的服务名，cordis fiber 永远停在 pending，启动审计因此只能报「The client Loader did not provide an error message. RendererStartupFailure」。现在客户端改为 `ctx.inject(['configForms'], …)` 动态等待该服务——服务缺失时插件照常启动、只是不显示设置页，未来再改名也不会再把启动拖垮。
