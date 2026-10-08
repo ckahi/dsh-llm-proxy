@@ -1,7 +1,6 @@
 /**
- * 模型代理 card: registered into the Plugins page (dsh 0.2.0 official seat
- * `plugins.bundle.config`, or the web-all family seat `web-ui.plugin.item`).
- * The header names the plugin
+ * 模型代理 page: the card registered into 设置 → 插件 (`plugins.item`), the
+ * configurable-plugin tab the Plugins page owns. The header names the plugin
  * and the body discloses the configurable items in place — the proxy endpoint
  * (host + port), the 走代理的模型 multi-select (populated from the configured
  * model list via the host bridge), and the retry policy (retries + interval).
@@ -17,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   FieldWrite, ProxyModelRow, ProxyModelScope, ProxyModelSnapshot, TestResult,
 } from './settings-scope.ts'
@@ -34,12 +33,10 @@ export interface ProxyModelCardInjected {
   t: (key: keyof typeof en) => string
 }
 
-/** Props delivered by the slot outlet (inject face spread flat). The card
- * registers into either the official `plugins.bundle.config` keyed seat or the
- * web-all family list seat, so the slot-runtime props stay untyped here. */
+/** Props delivered by the slot outlet (inject face spread flat). */
 export type ProxyModelCardProps =
-  InjectFace<ProxyModelCardInjected>
-  & Record<string, unknown>
+  PropsRuntime<'plugins.item'>
+  & InjectFace<ProxyModelCardInjected>
 
 /** The resolved llm-proxy config shape (mirrors lib/index.js Config). */
 interface ProxyConfig {
@@ -455,17 +452,47 @@ function CardBody(props: Required<ProxyModelCardInjected>): ReactNode {
   )
 }
 
+/** The render context the dsh 0.2.0 plugin-manager passes through the slot
+ * outlet. It mounts this one card component at three places per plugin: the
+ * list row and the detail description line both render {view:'summary'} (the
+ * output lands inside the host's own title/description styling), while the
+ * detail config section renders {view:'page', form, renderComponents}. Older
+ * hosts (0.1.7) render the card standalone with no view prop at all. */
+interface ViewContext {
+  view?: 'summary' | 'page'
+}
+
 /**
- * The 模型代理 page body: a header naming the plugin over a line describing
- * what its settings govern, disclosing the configurable items in place. It
- * opens expanded because the Plugins page already spent one click on the tab.
+ * The 模型代理 card. Dispatches on the slot render context:
+ * - `summary` — a compact one-line blurb (no form, no interactive state); the
+ *   host already draws the title around it, so emitting the full form here
+ *   spread the config across the plugin list and duplicated it on the detail
+ *   page (v1.5.5 regression on dsh 0.2.0).
+ * - `page` — the configuration form only (the detail header is the host's).
+ * - no `view` (dsh 0.1.7 standalone) — the legacy self-contained card with its
+ *   own header and expand/collapse chevron.
  * Renders nothing (returns null) until the slot outlet supplies the inject
  * face.
  */
 export function ProxyModelCard(props: ProxyModelCardProps): ReactNode {
+  const { scope, useSnapshot, t, view } = props as ProxyModelCardProps & ViewContext
+  if (scope === undefined || useSnapshot === undefined || t === undefined) return null
+  if (view === 'summary') {
+    return <span data-testid="proxy-model-summary">{t('description')}</span>
+  }
+  if (view === 'page') {
+    return <CardBody scope={scope} useSnapshot={useSnapshot} t={t} />
+  }
+  return <StandaloneCard scope={scope} useSnapshot={useSnapshot} t={t} />
+}
+
+/** The legacy dsh 0.1.7 rendering: a self-contained card with a header naming
+ * the plugin over a line describing what its settings govern, disclosing the
+ * configurable items in place. It opens expanded because the Plugins page
+ * already spent one click on the tab. */
+function StandaloneCard(props: Required<ProxyModelCardInjected>): ReactNode {
   const { scope, useSnapshot, t } = props
   const [open, setOpen] = useState(true)
-  if (scope === undefined || useSnapshot === undefined || t === undefined) return null
   return (
     <li className={styles.card}>
       <button
