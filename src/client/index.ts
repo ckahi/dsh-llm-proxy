@@ -63,12 +63,14 @@ export const inject = ['slots', 'locale']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  console.info('[dsh-llm-proxy] client module loaded')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-llm-proxy: copy dictionaries')
   const t = ctx.locale.bind(NS) as ProxyModelCardInjected['t']
 
   // Dynamic inject: this plugin must boot on a host without the settings
   // service, and only the card depends on it.
   ctx.inject(['configForms'], (child) => {
+    console.info('[dsh-llm-proxy] configForms service available')
     const forms = configFormsOf(child)
     if (forms === undefined) return
     const binder = new LlmProxySettingsBinder(child)
@@ -84,58 +86,33 @@ export function apply(ctx: ClientContext): void {
     // dsh 0.2.0 moved the Plugins page to a main-UI surface
     // (@deepseek-ai/dsh-client-ui-plugin-manager) whose bundle-configuration
     // seat `plugins.bundle.config` is keyed by the BUNDLE's PACKAGE NAME.
-    // Replacements of the web shell (e.g. @linxin666/dsh-web-all) host their
-    // own list seat `web-ui.plugin.item` and expose a `webUiSettings` service
-    // while loaded — the same dual-seat contract the web-all family plugins
-    // follow: land on the official seat, move to the family seat the moment
-    // the group is live, re-evaluated on every `slots/changed`. The entry is
-    // disposed before the replacement registers, so the card is never in two
-    // seats at once.
+    // Shell-replacement web UIs (e.g. @linxin666/dsh-web-all) render the card
+    // from their own list seat `web-ui.plugin.item` instead. Register BOTH
+    // seats unconditionally: no single page renders both, and seat selection
+    // by probing which UI is live proved fragile in the field.
     const BUNDLE_PACKAGE_NAME = '@superfish058/dsh-llm-proxy'
     const OFFICIAL_SEAT = 'plugins.bundle.config'
     const FAMILY_SEAT = 'web-ui.plugin.item'
-    const familyGroupLoaded = (): boolean => {
-      try {
-        return (child as unknown as { get(name: string): unknown }).get('webUiSettings') !== undefined
-      } catch {
-        return false
-      }
-    }
     child.effect(() => forms.whileServed([LLM_PROXY_NAMESPACE], () => {
-      let dispose: (() => void) | undefined
-      let current: string | undefined
-      let reconciling = false
-      const register = (name: string, options: Record<string, unknown>): void => {
-        dispose = child.slots.inject(name as typeof OFFICIAL_SEAT | typeof FAMILY_SEAT, () => child.slots.register({
-          name,
-          locale: NS,
-          inject: injected,
-          ...options,
-        } as Parameters<typeof child.slots.register>[0], ProxyModelCard as never))
-      }
-      const reconcile = (): void => {
-        if (reconciling) return
-        const target = familyGroupLoaded() ? FAMILY_SEAT : OFFICIAL_SEAT
-        if (current === target) return
-        reconciling = true
-        const previous = dispose
-        dispose = undefined
-        current = undefined
-        previous?.()
+      const disposers: Array<() => void> = []
+      const trySeat = (seat: string, options: Record<string, unknown>): void => {
         try {
-          register(target, target === FAMILY_SEAT
-            ? { id: LLM_PROXY_NAMESPACE, order: 50, label: () => t('title') }
-            : { key: BUNDLE_PACKAGE_NAME })
-          current = target
-        } finally {
-          reconciling = false
+          disposers.push(child.slots.inject(seat as typeof OFFICIAL_SEAT, () => child.slots.register({
+            name: seat,
+            locale: NS,
+            inject: injected,
+            ...options,
+          } as Parameters<typeof child.slots.register>[0], ProxyModelCard as never)))
+        } catch (error) {
+          // The seat is not declared by the running UI (e.g. the family seat
+          // on a clean host) — skipping it is the correct downgrade.
+          console.warn(`[dsh-llm-proxy] seat ${seat} refused:`, error)
         }
       }
-      try {
-        child.on('slots/changed', () => { reconcile() })
-      } catch { /* older hosts: the initial reconcile below still applies */ }
-      reconcile()
-      return () => { dispose?.() }
+      trySeat(OFFICIAL_SEAT, { key: BUNDLE_PACKAGE_NAME })
+      trySeat(FAMILY_SEAT, { id: LLM_PROXY_NAMESPACE, order: 50, label: () => t('title') })
+      console.info('[dsh-llm-proxy] card registered into plugin seats')
+      return () => { for (const off of disposers) off() }
     }), 'dsh-llm-proxy: settings page')
   })
 }
