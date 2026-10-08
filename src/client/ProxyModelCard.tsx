@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   FieldWrite, ProxyModelRow, ProxyModelScope, ProxyModelSnapshot, TestResult,
@@ -480,7 +480,7 @@ export function ProxyModelCard(props: ProxyModelCardProps): ReactNode {
           <span className={styles.name}>{t('title')}</span>
           <span className={styles.description}>{t('description')}</span>
         </span>
-        <IconChevronDownOutline14 className={styles.chevron + (open ? ` ${styles.chevronOpen}` : '')} />
+        <IconChevronDownOutlineRegular className={styles.chevron + (open ? ` ${styles.chevronOpen}` : '')} />
       </button>
       {open && <CardBody scope={scope} useSnapshot={useSnapshot} t={t} />}
     </li>

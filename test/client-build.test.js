@@ -14,13 +14,14 @@ test('client bundle is built and well-formed', () => {
   const source = readFileSync(path, 'utf8')
   assert.ok(source.includes('window.__ModuleLoader__.load'), 'loader handoff present')
   assert.ok(source.includes('"@superfish058/dsh-llm-proxy"'), 'scoped bundle id stamped')
+  assert.ok(source.includes('plugins.item'), 'plugins.item list entry present')
   assert.ok(source.includes('plugins.bundle.config'), 'official bundle-config seat present')
   assert.ok(source.includes('web-ui.plugin.item'), 'web-all family seat present')
-  // dsh 0.2.0: the official Plugins page is a main-UI surface keyed by the
-  // bundle package name; the interim keyed settings seat must be gone.
+  assert.ok(source.includes('IconChevronDownOutlineRegular'), '0.2.0 icon name used')
+  assert.ok(!source.includes('IconChevronDownOutline14'), 'removed 0.1.x icon name gone')
+  // dsh 0.2.0: the interim keyed settings seat must be gone.
   assert.ok(source.includes('configForms'), 'configForms binding present')
   assert.ok(!source.includes('settings.plugin.item'), 'alpha.1 settings seat removed')
-  assert.ok(!/inject\("plugins\.item"|name: "plugins\.item"/.test(source), '0.1.7 slot name removed')
   assert.ok(!/exports\.inject\s*=\s*\[[^\]]*settingsScope/.test(source), 'rc.7 settingsScope service name removed')
   assert.ok(/exports\.apply\s*=/.test(source), 'apply exported')
   assert.ok(/exports\.inject\s*=/.test(source), 'inject exported')

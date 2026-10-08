@@ -46,6 +46,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * Both declared at runtime by their owning pages; declared here so this
      * package keeps compiling without those packages' typings installed.
      */
+    'plugins.item': { kind: 'list', scope: 'root' };
     'plugins.bundle.config': { kind: 'keyed', scope: 'root' };
     'web-ui.plugin.item': { kind: 'list', scope: 'root' };
   }
@@ -84,34 +85,38 @@ export function apply(ctx: ClientContext): void {
     // plugin shows no trace of it.
     //
     // dsh 0.2.0 moved the Plugins page to a main-UI surface
-    // (@deepseek-ai/dsh-client-ui-plugin-manager) whose bundle-configuration
-    // seat `plugins.bundle.config` is keyed by the BUNDLE's PACKAGE NAME.
-    // Shell-replacement web UIs (e.g. @linxin666/dsh-web-all) render the card
-    // from their own list seat `web-ui.plugin.item` instead. Register BOTH
-    // seats unconditionally: no single page renders both, and seat selection
-    // by probing which UI is live proved fragile in the field.
+    // (@deepseek-ai/dsh-client-ui-plugin-manager). Its page reads FOUR seats:
+    // `plugins.item` (list) supplies the visible entry rows AND the card drawn
+    // on the entry's detail page (`view: "page"`), so it is the primary
+    // registration; `plugins.bundle.config` (keyed by the bundle's package
+    // name) attaches a config section to the bundle's own page; shell
+    // replacements (e.g. @linxin666/dsh-web-all) render the card from their
+    // own list seat `web-ui.plugin.item`. Register all three; a seat the
+    // running UI does not declare is skipped with a warning.
     const BUNDLE_PACKAGE_NAME = '@superfish058/dsh-llm-proxy'
-    const OFFICIAL_SEAT = 'plugins.bundle.config'
+    const LIST_SEAT = 'plugins.item'
+    const BUNDLE_SEAT = 'plugins.bundle.config'
     const FAMILY_SEAT = 'web-ui.plugin.item'
     child.effect(() => forms.whileServed([LLM_PROXY_NAMESPACE], () => {
       const disposers: Array<() => void> = []
       const trySeat = (seat: string, options: Record<string, unknown>): void => {
         try {
-          disposers.push(child.slots.inject(seat as typeof OFFICIAL_SEAT, () => child.slots.register({
+          disposers.push(child.slots.inject(seat as typeof LIST_SEAT, () => child.slots.register({
             name: seat,
             locale: NS,
             inject: injected,
             ...options,
           } as Parameters<typeof child.slots.register>[0], ProxyModelCard as never)))
+          console.info(`[dsh-llm-proxy] card registered into ${seat}`)
         } catch (error) {
-          // The seat is not declared by the running UI (e.g. the family seat
-          // on a clean host) — skipping it is the correct downgrade.
+          // The seat is not declared by the running UI — skipping it is the
+          // correct downgrade.
           console.warn(`[dsh-llm-proxy] seat ${seat} refused:`, error)
         }
       }
-      trySeat(OFFICIAL_SEAT, { key: BUNDLE_PACKAGE_NAME })
+      trySeat(LIST_SEAT, { id: LLM_PROXY_NAMESPACE, order: 50, label: () => t('title') })
+      trySeat(BUNDLE_SEAT, { key: BUNDLE_PACKAGE_NAME })
       trySeat(FAMILY_SEAT, { id: LLM_PROXY_NAMESPACE, order: 50, label: () => t('title') })
-      console.info('[dsh-llm-proxy] card registered into plugin seats')
       return () => { for (const off of disposers) off() }
     }), 'dsh-llm-proxy: settings page')
   })
